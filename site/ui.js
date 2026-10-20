@@ -81,7 +81,7 @@ export function table(cols, rows, { onRow, sortCol = null, desc = true } = {}) {
 
 // ---- totals ---------------------------------------------------------------------------------
 
-const ADD = ['games', 'correct', 'exact', 'points', 'margin_err_sum', 'total_err_sum'];
+const ADD = ['games', 'correct', 'exact', 'margin_err_sum', 'total_err_sum'];
 
 /** Adds up rows from week_scores / season_scores / team_stats and works out the ratios. */
 export function totals(rows) {
@@ -95,7 +95,6 @@ export function finish(t) {
   return {
     ...t,
     pct: n ? (100 * t.correct) / n : null,
-    avgPoints: n ? t.points / n : null,
     avgMarginErr: n ? t.margin_err_sum / n : null,
     avgTotalErr: n ? t.total_err_sum / n : null,
   };

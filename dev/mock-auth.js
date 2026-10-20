@@ -88,20 +88,20 @@ function periodsView() {
 const scored = () => picks.filter((p) => gameById.get(p.game_id).status === 'final').map((p) => {
   const g = gameById.get(p.game_id), s = scorePick(p, g), who = person(p.user_id);
   return { ...g, game_id: g.id, user_id: p.user_id, name: who.name, handle: who.handle, home_pick: p.home_pick, away_pick: p.away_pick,
-    correct: s.correct, exact: s.exact, margin_err: s.marginErr, total_err: s.totalErr, points: s.points, blowout: Math.abs(g.home_score - g.away_score) };
+    correct: s.correct, exact: s.exact, margin_err: s.marginErr, total_err: s.totalErr, blowout: Math.abs(g.home_score - g.away_score) };
 });
 
 function agg(rows, keys) {
   const m = new Map();
   for (const r of rows) {
     const k = keys.map((c) => r[c]).join('|');
-    const a = m.get(k) ?? { ...Object.fromEntries(keys.map((c) => [c, r[c]])), name: r.name, handle: r.handle, games: 0, correct: 0, exact: 0, points: 0, margin_err_sum: 0, total_err_sum: 0 };
-    a.games++; a.correct += +r.correct; a.exact += +r.exact; a.points += r.points; a.margin_err_sum += r.margin_err; a.total_err_sum += r.total_err;
+    const a = m.get(k) ?? { ...Object.fromEntries(keys.map((c) => [c, r[c]])), name: r.name, handle: r.handle, games: 0, correct: 0, exact: 0, margin_err_sum: 0, total_err_sum: 0 };
+    a.games++; a.correct += +r.correct; a.exact += +r.exact; a.margin_err_sum += r.margin_err; a.total_err_sum += r.total_err;
     m.set(k, a);
   }
   const fin = periodsView();
   return [...m.values()].map((a) => ({
-    ...a, pct: +(100 * a.correct / a.games).toFixed(1), avg_points: +(a.points / a.games).toFixed(2),
+    ...a, pct: +(100 * a.correct / a.games).toFixed(1),
     avg_margin_err: +(a.margin_err_sum / a.games).toFixed(2), avg_total_err: +(a.total_err_sum / a.games).toFixed(2),
     games_in_week: fin.find((p) => p.season === a.season && p.stype === a.stype && p.week === a.week)?.final_games ?? a.games,
   }));

@@ -1,11 +1,9 @@
-// Scoring for one pick on a finished game. The database computes the same numbers in the
-// picks.scored view (supabase/migrations/20261020000000_picks.sql); test/db.test.js checks they agree.
-//   10  right winner (or a correctly called tie)
-//  + up to 5 margin bonus: 5 minus how far the predicted margin was off (floor 0)
-//  +  5  exact score
-export const WINNER = 10;
-export const MARGIN_MAX = 5;
-export const EXACT = 5;
+// How one pick did on a finished game. There are no points: a pick is judged on whether it had the right
+// winner (or correctly called a tie), whether it was the exact score, and how far off it was.
+// The database computes the same numbers in the picks.scored view (supabase/migrations/); test/db.test.js
+// checks they agree.
+//   marginErr  how far the predicted margin (home minus away) was from the real margin
+//   totalErr   how far the two predicted scores were from the real ones, added together
 
 // For a game in progress: is the pick's winner ahead right now? (Not a score, just who is leading.)
 export function leading(pick, game) {
@@ -21,8 +19,5 @@ export function scorePick(pick, game) {
   const totalErr = Math.abs(pick.home_pick - game.home_score) + Math.abs(pick.away_pick - game.away_score);
   const correct = Math.sign(predMargin) === Math.sign(actualMargin);
   const exact = totalErr === 0;
-  let points = 0;
-  if (correct) points += WINNER + Math.max(0, MARGIN_MAX - marginErr);
-  if (exact) points += EXACT;
-  return { correct, exact, marginErr, totalErr, points };
+  return { correct, exact, marginErr, totalErr };
 }

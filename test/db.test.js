@@ -95,11 +95,11 @@ test('scoring: SQL view agrees with the JS implementation', async () => {
     const id = `00000000-0000-0000-0000-0000000001${String(i).padStart(2, '0')}`;
     await db.query(`insert into auth.users values ($1)`, [id]);
     await db.query(`insert into picks.picks (user_id, game_id, home_pick, away_pick) values ($1, 'a1', $2, $3)`, [id, h, a]);
-    const { rows } = await db.query(`select points, correct, exact, margin_err, total_err from picks.scored where user_id = $1`, [id]);
+    const { rows } = await db.query(`select correct, exact, margin_err, total_err from picks.scored where user_id = $1`, [id]);
     const js = scorePick({ home_pick: h, away_pick: a }, g);
     assert.deepEqual(
-      [rows[0].points, rows[0].correct, rows[0].exact, rows[0].margin_err, rows[0].total_err],
-      [js.points, js.correct, js.exact, js.marginErr, js.totalErr],
+      [rows[0].correct, rows[0].exact, rows[0].margin_err, rows[0].total_err],
+      [js.correct, js.exact, js.marginErr, js.totalErr],
       `pick ${h}-${a}`,
     );
   }
@@ -148,23 +148,25 @@ test('week, season, team and streak stats', async () => {
   await db.query(`delete from picks.picks`);
   await db.query(`update picks.games set home_score = 27, away_score = 20, status = 'final' where id = 'a1'`);
   const ins = (u, g, h, a) => db.query(`insert into picks.picks (user_id, game_id, home_pick, away_pick) values ($1, $2, $3, $4)`, [u, g, h, a]);
-  await ins(ANN, 'a1', 27, 20); // exact: 20
-  await ins(ANN, 'a2', 10, 31); // exact: 20
-  await ins(BOB, 'a1', 20, 27); // wrong: 0
-  await ins(BOB, 'a2', 13, 30); // right, margin off by 4: 11
+  await ins(ANN, 'a1', 27, 20); // exact
+  await ins(ANN, 'a2', 10, 31); // exact
+  await ins(BOB, 'a1', 20, 27); // wrong winner
+  await ins(BOB, 'a2', 13, 30); // right winner, scores 4 off in total
 
-  const week = (await as(ANN, `select name, handle, games, correct, exact, points, pct, avg_margin_err, games_in_week from picks.week_scores order by points desc`)).rows;
+  const week = (await as(ANN, `select name, handle, games, correct, exact, pct, avg_margin_err, avg_total_err, games_in_week from picks.week_scores order by correct desc, avg_total_err`)).rows;
   assert.equal(week[0].name, 'Ann A');
-  assert.equal(week[0].points, 40);
+  assert.equal(week[0].correct, 2);
+  assert.equal(Number(week[0].avg_total_err), 0);
   assert.equal(week[0].exact, 2);
   assert.equal(week[0].games_in_week, 2);
   assert.equal(week[1].name, '@bob');
-  assert.equal(week[1].points, 11);
+  assert.equal(week[1].correct, 1);
+  assert.equal(Number(week[1].avg_total_err), 9); // bob: 14 off on a1, 4 off on a2
   assert.equal(Number(week[1].pct), 50);
   assert.equal(Number(week[1].avg_margin_err), 9);
 
-  const season = (await as(ANN, `select points, games from picks.season_scores where handle = 'bob'`)).rows[0];
-  assert.deepEqual([season.points, season.games], [11, 2]);
+  const season = (await as(ANN, `select correct, games from picks.season_scores where handle = 'bob'`)).rows[0];
+  assert.deepEqual([season.correct, season.games], [1, 2]);
 
   const kc = (await as(ANN, `select games, picked_win, actual_win, pred_for, actual_for from picks.team_stats where handle = 'ann' and team = 'KC'`)).rows[0];
   // KC at home in a1 (27-20, picked 27-20) and away in a2 (31 vs NE 10, picked 31-10)

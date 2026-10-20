@@ -17,22 +17,24 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
   of that (`insert into picks.open_weeks values (2026, 2, 7);`, delete the row to go back to the rule).
 - **History** (`/me`, `/u/<handle>`, add `/<season>` or `/<season>/<stype>/<week>`): every season and week you have
   played, with picks next to the real results.
-- **Leaderboard**: all time, a season or a single week, ranked by points, avg points, winner %, margin error or exact scores.
+- **Leaderboard**: all time, a season or a single week, ranked by winners right (default), winner %, margin error, total-score error or exact scores.
 - **Search**: best/worst weeks and seasons (any player, any metric), and a pick explorer (biggest misses, closest calls,
   exact scores, blowouts, by team, player or season).
 - **Stats**: per player and per team (accuracy, margin and total-score error, picked-to-win % vs actual win %,
   longest streak) and a community "most overrated team" table.
 
-## Scoring (max 20 per game)
+## How picks are judged
 
-| | Points |
-|---|---|
-| Right winner (or a correctly called tie) | 10 |
-| Margin bonus | 5 minus how far your predicted margin was off (min 0) |
-| Exact score | +5 |
+There are no points. A pick on a finished game is judged on:
 
-Scores are computed from picks and results when read, so changing the formula (`picks.scored` in the migration, plus
-`site/scoring.js` for the per-game display) re-scores all history.
+- **Winner right**: it had the right winner (or correctly called a tie).
+- **Exact**: it was the exact final score.
+- **Margin error**: how far the predicted margin (home minus away) was from the real margin.
+- **Total-score error**: how far the two predicted scores were from the real ones, added together.
+
+Leaderboards and "best/worst" searches rank by the column you choose (winners right by default). Ties go to more
+winners right, then the smaller total-score error. Everything is computed from picks and results when read
+(`picks.scored` and the views built on it, plus `site/scoring.js` for the per-game display).
 
 ## How it fits together
 
@@ -50,7 +52,7 @@ Scores are computed from picks and results when read, so changing the formula (`
 Already done for the DurpeeSquid project (schema, exposed schema, function, schedule and 2023 onward loaded). To
 rebuild elsewhere, or to see what exists:
 
-1. **Migrations:** apply the files in `supabase/migrations/` in order (`..._picks.sql`, `..._picks_sync_auth.sql`, `..._picks_live_and_open_weeks.sql`).
+1. **Migrations:** apply the files in `supabase/migrations/` in order (`..._picks.sql`, `..._picks_sync_auth.sql`, `..._picks_live_and_open_weeks.sql`, `..._picks_remove_points.sql`).
    Then expose the schema to the API: add `picks` to Settings > API > Exposed schemas (or, in SQL,
    `alter role authenticator set pgrst.db_schemas = '<existing list>, picks'; notify pgrst, 'reload config';`).
 2. **Project row:** a `picks` row in `public.projects` (slug `picks`, title `NFL Picks`, url

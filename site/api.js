@@ -102,11 +102,15 @@ export async function teams() {
 }
 
 /** Best/worst search over weeks or seasons, ranked by the database. */
-export async function ranked(view, { column, ascending, minGames, handle, season, limit = 50 }) {
+export async function ranked(view, { column, ascending, minGames, handle, season, worst = false, limit = 50 }) {
   let q = db.from(view).select('*').gte('games', minGames);
   if (handle) q = q.eq('handle', handle.toLowerCase());
   if (season) q = q.eq('season', season);
-  return ok(await q.order(column, { ascending }).order('points', { ascending: false }).limit(limit));
+  q = q.order(column, { ascending });
+  // ties: more winners right is better, then the smaller total-score error (reversed when looking for the worst)
+  if (column !== 'correct') q = q.order('correct', { ascending: worst });
+  if (column !== 'avg_total_err') q = q.order('avg_total_err', { ascending: !worst });
+  return ok(await q.limit(limit));
 }
 
 /** Individual scored picks: biggest misses, exact calls, upsets... */
