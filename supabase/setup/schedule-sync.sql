@@ -1,4 +1,4 @@
--- Schedules the sync-games Edge Function to run every 2 minutes (pg_cron + pg_net). The function decides
+-- Schedules the sync-games Edge Function to run every minute (pg_cron + pg_net). The function decides
 -- by itself whether there is anything to do (see supabase/functions/sync-games/index.ts), so most runs
 -- end immediately. This is already applied to the DurpeeSquid project; keep it for rebuilding elsewhere.
 -- It is not a migration because it contains the project URL. Replace <project-ref> and run it once.
@@ -20,7 +20,7 @@ end $$;
 
 select cron.schedule(
   'picks-sync-games',
-  '*/2 * * * *',
+  '* * * * *',
   $job$
   select net.http_post(
     url     := 'https://<project-ref>.supabase.co/functions/v1/sync-games',

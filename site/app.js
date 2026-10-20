@@ -5,10 +5,11 @@
 //   /leaderboard  /search  /teams
 import { requireLogin, hasAccess, signOut, HOME, loadProfile } from './session.js';
 import * as api from './api.js';
-import { scorePick, WINNER, MARGIN_MAX, EXACT } from './scoring.js';
+import { scorePick, leading, WINNER, MARGIN_MAX, EXACT } from './scoring.js';
 import { $, el, weekLabel, periodKey, pct, num, fmtTime, logo, toast, select, stat, table, totals, finish } from './ui.js';
 
 const SLUG = 'picks';
+let liveTimer; // refreshes the cards of games in progress
 
 const session = await requireLogin();
 if (!(await hasAccess(SLUG))) {
@@ -68,6 +69,7 @@ const heading = (eyebrow, title, right) =>
 const failed = (e) => view(el('section', { className: 'panel' }, el('h2', {}, 'Something went wrong'), el('p', { className: 'muted' }, e.message)));
 
 async function render() {
+  clearInterval(liveTimer);
   drawNav();
   const path = location.pathname.replace(/\/+$/, '') || '/';
   const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
@@ -112,6 +114,9 @@ function weekFromQuery() {
 function gameCard(game, pick, { inputs, who, state, mine } = {}) {
   const result = pick ? scorePick(pick, game) : null;
   const final = game.status === 'final';
+  const live = game.status === 'live';
+  const shows = final || live; // the real score is on the card
+  const ahead = pick ? leading(pick, game) : null;
   const t = (side) => ({ abbr: game[side], name: game[`${side}_name`], logo: game[`${side}_logo`], score: game[`${side}_score`] });
 
   const row = (side, other) => {
@@ -125,17 +130,32 @@ function gameCard(game, pick, { inputs, who, state, mine } = {}) {
       (inputs[game.id] ??= {})[side] = input;
       control = input;
     } else if (pick) control = el('span', { className: 'pickread', title: 'Pick' }, pick[`${side}_pick`]);
-    return el('div', { className: `team${final && x.score > y.score ? ' win' : ''}` },
-      logo(x.logo), el('span', { className: 'abbr' }, x.abbr), el('span', { className: 'tname' }, x.name),
-      final ? el('span', { className: 'real' }, x.score) : null, control);
+    return el('div', { className: `team${shows && x.score > y.score ? ' win' : ''}` },
+      logo(x.logo), el('span', { className: 'abbr' }, x.abbr),
+      live && game.possession === x.abbr && el('span', { className: 'ball', title: 'Has the ball' }, '🏈'),
+      el('span', { className: 'tname' }, x.name),
+      shows ? el('span', { className: 'real' }, x.score) : null, control);
   };
 
-  const cardState = state ?? (result ? (result.correct ? 'right' : 'wrong') : inputs ? 'open' : '');
+  // what is happening in a live game: clock, who has the ball, down and distance, field position
+  const situation = live && game.possession && [
+    game.possession && `${game.possession} ball`,
+    game.down_distance && `${game.down_distance}${game.field_pos ? ` at ${game.field_pos}` : ''}`,
+    game.red_zone && 'Red zone',
+  ].filter(Boolean).join(' · ');
+
+  const cardState = state ?? (live ? 'live' : result ? (result.correct ? 'right' : 'wrong') : inputs ? 'open' : '');
   const card = el('li', { className: 'game' },
-    el('div', {}, row('away', 'home'), row('home', 'away')),
+    el('div', {},
+      shows && pick && el('div', { className: 'cols' }, el('span', {}, 'Score'), el('span', {}, 'Pick')),
+      row('away', 'home'), row('home', 'away')),
+    live && el('div', { className: 'sit' },
+      el('span', { className: 'pill live' }, el('i', { className: 'livedot' }), 'Live'),
+      el('b', {}, game.detail ?? ''), situation && el('span', {}, situation)),
     el('div', { className: 'meta' },
       who,
       el('span', {}, fmtTime(game.kickoff)),
+      live && pick && el('span', { className: ahead ? 'good' : 'bad' }, ahead ? 'Your pick is ahead' : 'Your pick is behind'),
       result && el('span', { className: `pill`, style: `--c: var(--${result.correct ? 'good' : 'bad'})` }, result.correct ? 'Right winner' : 'Wrong winner'),
       result && el('span', {}, `${result.points} pts`),
       result && el('span', {}, result.exact ? 'Exact score 🎯' : `margin off by ${result.marginErr}, total off by ${result.totalErr}`),
@@ -185,6 +205,8 @@ async function weekPage(target, sel) {
   const sum = totals(scored.map((r) => ({ games: 1, correct: +r.correct, exact: +r.exact, points: r.points, margin_err_sum: r.marginErr, total_err_sum: r.totalErr })));
 
   const inputs = {};
+  const cardOf = (g) => gameCard(g, picks.get(g.id), { inputs: open(g) ? inputs : null, mine });
+  const cards = new Map(games.map((g) => [g.id, cardOf(g)]));
   const save = el('button', { type: 'button', className: 'btn primary', textContent: 'Save picks' });
   save.onclick = async () => {
     const toSave = [], toClear = [];
@@ -225,10 +247,35 @@ async function weekPage(target, sel) {
       el('span', {}, '🔒'),
       el('span', {}, earlier ? `Picks for this week open after ${weekLabel(earlier.stype, earlier.week)} ${earlier.season} ends.` : 'Picks for this week are not open yet.')),
     games.length
-      ? el('ul', { className: 'games' }, games.map((g) => gameCard(g, picks.get(g.id), { inputs: open(g) ? inputs : null, mine })))
+      ? el('ul', { className: 'games' }, [...cards.values()])
       : el('p', { className: 'empty' }, 'No games in this week.'),
     mine && anyOpen && el('div', { className: 'savebar' }, save,
       el('span', { className: 'muted' }, `Games lock at kickoff, and other players only see your pick after that. Max ${WINNER + MARGIN_MAX + EXACT} points per game.`)));
+  watchLive(games, cards, sel, cardOf);
+}
+
+/** While a game in this week is in progress, swap in fresh cards as its score and situation change. */
+function watchLive(games, cards, sel, cardOf) {
+  const sig = (g) => [g.status, g.home_score, g.away_score, g.detail, g.possession, g.down_distance, g.field_pos].join('|');
+  const active = (g) => g.status === 'live' || (g.status === 'scheduled' && new Date(g.kickoff) <= Date.now());
+  if (!games.some(active)) return;
+  const known = new Map(games.map((g) => [g.id, sig(g)]));
+  liveTimer = setInterval(async () => {
+    if (document.hidden) return;
+    try {
+      const fresh = await api.weekGames(sel);
+      for (const g of fresh) {
+        if (known.get(g.id) === sig(g)) continue;
+        known.set(g.id, sig(g));
+        const next = cardOf(g);
+        cards.get(g.id)?.replaceWith(next);
+        cards.set(g.id, next);
+      }
+      if (!fresh.some(active)) clearInterval(liveTimer);
+    } catch {
+      // keep what is on screen; the next tick tries again
+    }
+  }, 20_000);
 }
 
 const cell = (label, value) => el('div', { className: 'stat-cell' }, el('span', { className: 'stat-label' }, label), el('span', { className: 'stat-value' }, String(value)));

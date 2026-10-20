@@ -35,6 +35,13 @@ for (const [season, firstWeekStart] of [[2025, now - 400 * DAY], [2026, now - 36
   }
 }
 
+// one game in progress, to try the live display
+{
+  const g = games.find((x) => x.season === 2026 && x.week === 7 && x.stype === 2);
+  Object.assign(g, { status: 'live', kickoff: new Date(now - 3600e3).toISOString(), home_score: 14, away_score: 10, detail: '5:21 - 3rd',
+    possession: g.home, down_distance: '2nd & 8', field_pos: `${g.away} 35`, red_zone: false });
+}
+
 const people = [
   { user_id: 'me', handle: 'you', name: 'You', skill: 6 }, { user_id: 'u1', handle: 'gridiron_gus', name: 'Gus', skill: 3 },
   { user_id: 'u2', handle: 'blitz_betty', name: 'Betty', skill: 7 }, { user_id: 'u3', handle: 'the_oracle', name: 'The Oracle', skill: 4 },
@@ -46,6 +53,10 @@ for (const p of people) {
     const n = () => Math.round((rand() + rand() + rand() - 1.5) * p.skill);
     picks.push({ user_id: p.user_id, game_id: g.id, home_pick: Math.max(0, g.home_score + n()), away_pick: Math.max(0, g.away_score + n()) });
   }
+}
+{
+  const live = games.find((g) => g.status === 'live');
+  picks.push({ user_id: 'me', game_id: live.id, home_pick: 20, away_pick: 13 });
 }
 const profiles = people.map((p) => ({ user_id: p.user_id, handle: p.handle, display_name: p.name }));
 

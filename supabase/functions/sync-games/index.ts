@@ -1,8 +1,9 @@
 // Keeps picks.games in step with ESPN's public NFL scoreboard: schedules (this season and next, so a
 // new season appears on its own), playoff rounds as their matchups are set, and final scores.
-// Called every couple of minutes by pg_cron (see supabase/setup/schedule-sync.sql) and decides for
+// Called every minute by pg_cron (see supabase/setup/schedule-sync.sql) and decides for
 // itself how much work is needed:
-//   * games in progress           -> refresh the current week (1 ESPN request)
+//   * games in progress           -> refresh the current week every 15 seconds for about a minute
+//                                    (scores, clock, possession, down and distance, field position)
 //   * otherwise, every 30 minutes -> refresh the current week
 //   * every 6 hours               -> refresh every week of this season and the next
 // verify_jwt is off at the gateway; the shared secret is the check. It lives in Supabase Vault
@@ -45,18 +46,31 @@ function toRow(e: any, fallback?: { season: number; stype: number; week: number 
   const away = comp?.competitors?.find((c: any) => c.homeAway === 'away');
   const tbd = (c: any) => !c?.team?.abbreviation || /^(TBD|TBA)$/i.test(c.team.abbreviation);
   if (tbd(home) || tbd(away)) return null;
-  const final = !!e.status?.type?.completed;
-  const score = (c: any) => (final && c.score != null && c.score !== '' ? Number(c.score) : null);
+  const completed = !!e.status?.type?.completed;
+  const inProgress = e.status?.type?.state === 'in';
+  const score = (c: any) => ((completed || inProgress) && c.score != null && c.score !== '' ? Number(c.score) : null);
   const hs = score(home), as = score(away);
-  const isFinal = final && hs != null && as != null;
+  const isFinal = completed && hs != null && as != null;
+  const isLive = !isFinal && inProgress && hs != null && as != null;
+  const sit = isLive ? comp?.situation : null;
+  const ball = sit?.possession ? comp.competitors.find((c: any) => String(c.team?.id) === String(sit.possession))?.team?.abbreviation : null;
+  const ordinal = (n: number) => ['1st', '2nd', '3rd', '4th'][n - 1];
+  const downDistance = sit?.shortDownDistanceText ?? (sit?.down > 0 && sit?.distance > 0 ? `${ordinal(sit.down)} & ${sit.distance}` : null);
+  const fieldPos = sit?.possessionText ?? /at ([A-Z]{2,3} \d+)/.exec(sit?.downDistanceText ?? '')?.[1] ?? null;
   return {
     id: String(e.id), season, stype, week,
     kickoff: new Date(e.date).toISOString(),
     home: home.team.abbreviation, away: away.team.abbreviation,
     home_name: home.team.displayName, away_name: away.team.displayName,
     home_logo: home.team.logo ?? null, away_logo: away.team.logo ?? null,
-    home_score: isFinal ? hs : null, away_score: isFinal ? as : null,
-    status: isFinal ? 'final' : 'scheduled',
+    home_score: isFinal || isLive ? hs : null, away_score: isFinal || isLive ? as : null,
+    status: isFinal ? 'final' : isLive ? 'live' : 'scheduled',
+    // the situation of a game in progress; cleared again once it is not live
+    detail: isLive ? (e.status?.type?.shortDetail ?? null) : null,
+    possession: ball ?? null,
+    down_distance: downDistance,
+    field_pos: fieldPos,
+    red_zone: !!sit?.isRedZone,
     updated_at: new Date().toISOString(),
   };
 }
@@ -131,10 +145,20 @@ Deno.serve(async (req) => {
     }
 
     const live = await liveGames();
-    if (live || age(state?.last_sync) > 30 * 60e3) {
+    if (live) {
+      // cron fires once a minute; poll ESPN every 15 seconds within this run for near-live scores
+      let r = await syncCurrent();
+      for (let i = 0; i < 3; i++) {
+        await new Promise((res) => setTimeout(res, 15_000));
+        r = await syncCurrent();
+      }
+      await db.from('sync_state').update({ last_sync: new Date().toISOString() }).eq('id', 1);
+      return json({ mode: 'live', ...r });
+    }
+    if (age(state?.last_sync) > 30 * 60e3) {
       const r = await syncCurrent();
       await db.from('sync_state').update({ last_sync: now }).eq('id', 1);
-      return json({ mode: live ? 'live' : 'current', ...r });
+      return json({ mode: 'current', ...r });
     }
     return json({ mode: 'idle' });
   } catch (err) {

@@ -3,11 +3,11 @@
 // and the scoring and stats views.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { scorePick } from '../site/scoring.js';
 
-const MIGRATION = new URL('../supabase/migrations/20261020000000_picks.sql', import.meta.url);
+const MIGRATIONS = new URL('../supabase/migrations/', import.meta.url);
 
 const ANN = '00000000-0000-0000-0000-00000000000a';
 const BOB = '00000000-0000-0000-0000-00000000000b';
@@ -23,6 +23,8 @@ const BOOTSTRAP = `
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   grant usage on schema auth, public to authenticated, service_role, anon;
+  create schema vault;
+  create table vault.decrypted_secrets (name text, decrypted_secret text);
   create table public.project_access (user_id uuid, project_slug text, primary key (user_id, project_slug));
   create table public.profiles (user_id uuid primary key, handle text, display_name text not null default '');
   grant select on public.project_access, public.profiles to authenticated, service_role;
@@ -59,7 +61,9 @@ async function addGames(list) {
 before(async () => {
   db = new PGlite();
   await db.exec(BOOTSTRAP);
-  await db.exec(readFileSync(MIGRATION, 'utf8'));
+  for (const f of readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).sort()) {
+    await db.exec(readFileSync(new URL(f, MIGRATIONS), 'utf8'));
+  }
   await db.exec(`
     insert into auth.users values ('${ANN}'), ('${BOB}'), ('${EVE}');
     insert into public.project_access values ('${ANN}', 'picks'), ('${BOB}', 'picks');
@@ -187,4 +191,36 @@ test('a stalled week does not block later weeks forever', async () => {
   assert.equal(rows[0].ok, false);
   await db.query(`update picks.games set kickoff = now() - interval '9 days' where season = 2025 and week in (2, 3)`);
   assert.equal((await as(ANN, `select picks.game_pickable('next') as ok`)).rows[0].ok, true);
+});
+
+test('live games carry their situation and are locked but not final', async () => {
+  await db.query(`insert into picks.games (id, season, stype, week, kickoff, home, away, home_name, away_name,
+      home_score, away_score, status, detail, possession, down_distance, field_pos, red_zone)
+    values ('live1', 2030, 2, 1, now() - interval '1 hour', 'SF', 'WSH', 'SF', 'WSH', 14, 10, 'live', '5:21 - 3rd', 'SF', '2nd & 8', 'WSH 35', true)`);
+  const g = (await as(ANN, `select status, home_score, possession, down_distance, field_pos, red_zone, picks.game_locked(id) as locked, picks.game_pickable(id) as pickable from picks.games where id = 'live1'`)).rows[0];
+  assert.deepEqual([g.status, g.home_score, g.possession, g.down_distance, g.field_pos, g.red_zone, g.locked, g.pickable], ['live', 14, 'SF', '2nd & 8', 'WSH 35', true, true, false]);
+  // a live game is not scored yet, and a final game must have both scores
+  await db.query(`insert into picks.picks (user_id, game_id, home_pick, away_pick) values ($1, 'live1', 20, 10)`, [BOB]);
+  assert.equal((await db.query(`select count(*)::int as n from picks.scored where game_id = 'live1'`)).rows[0].n, 0);
+  await assert.rejects(db.query(`update picks.games set status = 'final', home_score = null where id = 'live1'`), /violates check/i);
+  await db.query(`delete from picks.picks where game_id = 'live1'`);
+  await db.query(`delete from picks.games where id = 'live1'`);
+});
+
+test('a week can be opened early without changing the others', async () => {
+  // 2031: week 1 is still to be played, so week 2 is closed...
+  await db.query(`insert into picks.games (id, season, stype, week, kickoff, home, away, home_name, away_name) values
+    ('e1', 2031, 2, 1, now() + interval '30 days', 'A', 'B', 'A', 'B'), ('e2', 2031, 2, 2, now() + interval '37 days', 'A', 'B', 'A', 'B'),
+    ('e3', 2031, 2, 3, now() + interval '44 days', 'A', 'B', 'A', 'B')`);
+  const open = async () => (await as(ANN, `select week, open from picks.periods where season = 2031 order by week`)).rows.map((r) => r.open);
+  const pickable = async (id) => (await as(ANN, `select picks.game_pickable($1) as ok`, [id])).rows[0].ok;
+  // (earlier seasons in this test database still have unfinished weeks, so only the override matters here)
+  assert.deepEqual(await open(), [false, false, false]);
+  await db.query(`insert into picks.open_weeks values (2031, 2, 2)`);
+  assert.deepEqual(await open(), [false, true, false]);
+  assert.equal(await pickable('e2'), true);
+  assert.equal(await pickable('e3'), false);
+  await rejects(as(ANN, `insert into picks.open_weeks values (2031, 2, 3)`));
+  await db.query(`delete from picks.open_weeks`);
+  assert.equal(await pickable('e2'), false);
 });

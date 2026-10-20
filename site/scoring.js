@@ -7,6 +7,12 @@ export const WINNER = 10;
 export const MARGIN_MAX = 5;
 export const EXACT = 5;
 
+// For a game in progress: is the pick's winner ahead right now? (Not a score, just who is leading.)
+export function leading(pick, game) {
+  if (game.status !== 'live' || game.home_score == null || game.away_score == null) return null;
+  return Math.sign(pick.home_pick - pick.away_pick) === Math.sign(game.home_score - game.away_score);
+}
+
 export function scorePick(pick, game) {
   if (game.status !== 'final' || game.home_score == null || game.away_score == null) return null;
   const predMargin = pick.home_pick - pick.away_pick;

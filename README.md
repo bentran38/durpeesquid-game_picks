@@ -10,6 +10,11 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
 - **Weeks unlock one at a time**: a week opens once every earlier week (across seasons, playoffs included) has ended.
   A week has ended when all its games are final, or 3 days after its last kickoff (so a postponed game can't block
   the schedule). New weeks, playoff rounds and next season's schedule arrive on their own (see "Keeping it current").
+- **Live games** show the running score, the clock, who has the ball, down and distance and field position when ESPN
+  provides it, with your pick beside the score and whether it is ahead right now. The sync polls ESPN every 15 seconds
+  while a game is on, and the page refreshes live cards every 20 seconds.
+- **Opening a week early**: weeks normally unlock in order, but a row in `picks.open_weeks` opens a specific week ahead
+  of that (`insert into picks.open_weeks values (2026, 2, 7);`, delete the row to go back to the rule).
 - **History** (`/me`, `/u/<handle>`, add `/<season>` or `/<season>/<stype>/<week>`): every season and week you have
   played, with picks next to the real results.
 - **Leaderboard**: all time, a season or a single week, ranked by points, avg points, winner %, margin error or exact scores.
@@ -45,7 +50,7 @@ Scores are computed from picks and results when read, so changing the formula (`
 Already done for the DurpeeSquid project (schema, exposed schema, function, schedule and 2023 onward loaded). To
 rebuild elsewhere, or to see what exists:
 
-1. **Migrations:** apply `supabase/migrations/20261020000000_picks.sql` and `20261020010000_picks_sync_auth.sql`.
+1. **Migrations:** apply the files in `supabase/migrations/` in order (`..._picks.sql`, `..._picks_sync_auth.sql`, `..._picks_live_and_open_weeks.sql`).
    Then expose the schema to the API: add `picks` to Settings > API > Exposed schemas (or, in SQL,
    `alter role authenticator set pgrst.db_schemas = '<existing list>, picks'; notify pgrst, 'reload config';`).
 2. **Project row:** a `picks` row in `public.projects` (slug `picks`, title `NFL Picks`, url
@@ -63,7 +68,7 @@ rebuild elsewhere, or to see what exists:
 ## Keeping it current
 
 `sync-games` runs on a 2-minute schedule and does only what is needed: while games are in progress it refreshes the
-current week (1 ESPN request); otherwise every 30 minutes; and every 6 hours it refreshes every week of this season
+current week every 15 seconds; otherwise every 30 minutes; and every 6 hours it refreshes every week of this season
 **and the next one**. So a new season's schedule appears when ESPN publishes it, playoff rounds appear as their
 matchups are set (undecided "TBD" matchups are skipped), and weeks unlock as the previous one ends. ESPN's API is
 unofficial and rejects some default client user agents (the function sends a browser-style one), so if its behaviour ever changes, `supabase/functions/sync-games/index.ts` is the only file to adjust.
