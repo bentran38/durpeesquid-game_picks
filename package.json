@@ -1,14 +1,12 @@
 {
-  "name": "durpeesquid-game-picks",
-  "version": "1.0.0",
-  "description": "Pick scores for every NFL game, keep your history forever, and compare with everyone else.",
-  "main": "server.js",
+  "name": "durpeesquid-picks",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "sync": "node scripts/sync.js",
-    "demo": "node scripts/demo.js",
-    "test": "node --test"
-  },
-  "engines": { "node": ">=22.13" },
-  "license": "MIT"
+    "build": "node scripts/gen-config.js",
+    "dev": "node scripts/gen-config.js && npx --yes serve site -l 8002 -s",
+    "dev:mock": "node dev/serve.js",
+    "test": "cd test && npm install --no-audit --no-fund && node --test"
+  }
 }

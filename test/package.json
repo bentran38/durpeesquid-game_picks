@@ -1,0 +1,7 @@
+{
+  "name": "durpeesquid-picks-tests",
+  "private": true,
+  "type": "module",
+  "description": "Runs the real migration in an in-process Postgres (PGlite). Kept separate so Vercel never installs it.",
+  "devDependencies": { "@electric-sql/pglite": "0.3.0" }
+}

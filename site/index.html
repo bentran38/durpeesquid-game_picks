@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pick the score of every NFL game and keep your history" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <script src="https://www.durpeesquid.com/theme.js"></script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="https://www.durpeesquid.com/themes.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <title>NFL Picks</title>
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+    <main id="app" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <a class="badge" id="home-link" href="https://durpeesquid.com" aria-label="Back to DurpeeSquid">DS</a>
+          <span class="wordmark">NFL Picks</span>
+          <span class="sep" aria-hidden="true"></span>
+          <span class="handle" id="handle"></span>
+        </div>
+        <nav class="actions" id="nav" aria-label="Sections"></nav>
+        <div class="actions">
+          <button type="button" class="btn" id="signout"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg> Sign out</button>
+        </div>
+      </header>
+      <div id="view"></div>
+      <footer class="foot">Scores · <a href="https://www.espn.com/nfl/">ESPN</a></footer>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
