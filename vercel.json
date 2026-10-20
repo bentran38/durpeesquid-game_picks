@@ -2,5 +2,12 @@
   "buildCommand": "npm run build",
   "outputDirectory": "site",
   "cleanUrls": true,
-  "rewrites": [{ "source": "/((?!.*\.).*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/me", "destination": "/index.html" },
+    { "source": "/me/:path*", "destination": "/index.html" },
+    { "source": "/u/:path*", "destination": "/index.html" },
+    { "source": "/leaderboard", "destination": "/index.html" },
+    { "source": "/search", "destination": "/index.html" },
+    { "source": "/teams", "destination": "/index.html" }
+  ]
 }
