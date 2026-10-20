@@ -107,8 +107,8 @@ export async function ranked(view, { column, ascending, minGames, handle, season
   if (handle) q = q.eq('handle', handle.toLowerCase());
   if (season) q = q.eq('season', season);
   q = q.order(column, { ascending });
-  // ties: more winners right is better, then the smaller total-score error (reversed when looking for the worst)
-  if (column !== 'correct') q = q.order('correct', { ascending: worst });
+  // ties: higher winner % is better, then the smaller total-score error (reversed when looking for the worst)
+  if (column !== 'pct') q = q.order('pct', { ascending: worst });
   if (column !== 'avg_total_err') q = q.order('avg_total_err', { ascending: !worst });
   return ok(await q.limit(limit));
 }

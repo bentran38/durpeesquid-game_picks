@@ -17,7 +17,7 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
   of that (`insert into picks.open_weeks values (2026, 2, 7);`, delete the row to go back to the rule).
 - **History** (`/me`, `/u/<handle>`, add `/<season>` or `/<season>/<stype>/<week>`): every season and week you have
   played, with picks next to the real results.
-- **Leaderboard**: all time, a season or a single week, ranked by winners right (default), winner %, margin error, total-score error or exact scores.
+- **Leaderboard**: all time, a season or a single week, ranked by winner % (default), margin error, total-score error or exact scores.
 - **Search**: best/worst weeks and seasons (any player, any metric), and a pick explorer (biggest misses, closest calls,
   exact scores, blowouts, by team, player or season).
 - **Stats**: per player and per team (accuracy, margin and total-score error, picked-to-win % vs actual win %,
@@ -27,13 +27,13 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
 
 There are no points. A pick on a finished game is judged on:
 
-- **Winner right**: it had the right winner (or correctly called a tie).
+- **Winner %**: how often it had the right winner (or correctly called a tie), shown with the totals, e.g. `88.8% (326/367)`.
 - **Exact**: it was the exact final score.
 - **Margin error**: how far the predicted margin (home minus away) was from the real margin.
 - **Total-score error**: how far the two predicted scores were from the real ones, added together.
 
-Leaderboards and "best/worst" searches rank by the column you choose (winners right by default). Ties go to more
-winners right, then the smaller total-score error. Everything is computed from picks and results when read
+Leaderboards and "best/worst" searches rank by the column you choose (winner % by default). Ties go to the smaller
+total-score error. Everything is computed from picks and results when read
 (`picks.scored` and the views built on it, plus `site/scoring.js` for the per-game display).
 
 ## How it fits together

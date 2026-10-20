@@ -234,7 +234,7 @@ async function weekPage(target, sel) {
 
   const heroRight = scored.length
     ? el('div', { className: 'statpanel' },
-        cell('Right', `${sum.correct}/${sum.games}`), cell('Exact', sum.exact), cell('Margin err', num(sum.avgMarginErr)), cell('Total err', num(sum.avgTotalErr)))
+        cell('Winner %', `${pct(sum.pct)} (${sum.correct}/${sum.games})`), cell('Exact', sum.exact), cell('Margin err', num(sum.avgMarginErr)), cell('Total err', num(sum.avgTotalErr)))
     : null;
 
   const earlier = period.open ? null : firstBlocker(ps, period);
@@ -306,18 +306,18 @@ async function profilePage(target, season) {
   }
 
   const eligible = weeks.filter((w) => w.games >= 5);
-  // best = most winners right, ties to the smaller total-score error
-  const byRight = (a, b) => b.correct - a.correct || a.avg_total_err - b.avg_total_err;
+  // best = highest winner %, ties to the smaller total-score error
+  const byRight = (a, b) => b.pct - a.pct || a.avg_total_err - b.avg_total_err;
   const rankedWeeks = [...eligible].sort(byRight);
   const rankedSeasons = [...seasonRows].sort(byRight);
-  const weekLink = (w) => w ? link(`${personHref(target)}/${w.season}/${w.stype}/${w.week}`, `${w.correct}/${w.games} right · ${weekLabel(w.stype, w.week)} ${w.season}`) : '–';
-  const seasonText = (r) => (r ? `${r.correct}/${r.games} right · ${r.season}` : '–');
+  const weekLink = (w) => w ? link(`${personHref(target)}/${w.season}/${w.stype}/${w.week}`, `${pct(w.pct)} (${w.correct}/${w.games}) · ${weekLabel(w.stype, w.week)} ${w.season}`) : '–';
+  const seasonText = (r) => (r ? `${pct(r.pct)} (${r.correct}/${r.games}) · ${r.season}` : '–');
 
   view(
     heading(target === me ? `You${me.handle ? ` · @${me.handle}` : ''}` : `@${target.handle}`, target.name),
     el('div', { className: 'row filters' }, seasonSelect),
     el('div', { className: 'tiles' },
-      stat('Winners right', `${o.correct}/${o.games} (${pct(o.pct)})`), stat('Exact scores', o.exact),
+      stat('Winner %', `${pct(o.pct)} (${o.correct}/${o.games})`), stat('Exact scores', o.exact),
       stat('Avg margin error', num(o.avgMarginErr)), stat('Avg total-score error', num(o.avgTotalErr)),
       stat('Longest streak', `${streak.longest} (now ${streak.current})`)),
     el('div', { className: 'tiles' },
@@ -327,8 +327,7 @@ async function profilePage(target, season) {
     el('h2', { className: 'section' }, 'Seasons'),
     table([
       { label: 'Season', val: (r) => r.season, num: false }, { label: 'Games', val: (r) => r.games, num: true },
-      { label: 'Right', val: (r) => r.correct, cell: (r) => `${r.correct}/${r.games}`, num: true },
-      { label: 'Right %', val: (r) => +r.pct, cell: (r) => pct(r.pct), num: true }, { label: 'Exact', val: (r) => r.exact, num: true },
+      { label: 'Winner %', val: (r) => +r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true }, { label: 'Exact', val: (r) => r.exact, num: true },
       { label: 'Margin err', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
       { label: 'Total err', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
     ], seasonRows, { sortCol: 0, onRow: (r) => go(`${base}/${r.season}`) }),
@@ -337,7 +336,7 @@ async function profilePage(target, season) {
       { label: 'Season', val: (r) => r.season, num: false },
       { label: 'Week', val: (r) => r.stype * 100 + r.week, cell: (r) => weekLabel(r.stype, r.week), num: false },
       { label: 'Picked', val: (r) => r.games, cell: (r) => `${r.games}/${r.games_in_week}`, num: true },
-      { label: 'Right', val: (r) => r.correct, cell: (r) => `${r.correct}/${r.games}`, num: true },
+      { label: 'Winner %', val: (r) => +r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true },
       { label: 'Exact', val: (r) => r.exact, num: true }, { label: 'Margin err', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
       { label: 'Total err', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
     ], weeks, { sortCol: 3, onRow: (r) => go(`${base}/${r.season}/${r.stype}/${r.week}`) }),
@@ -369,7 +368,7 @@ function byTeam(rows) {
 function teamTable(rows, sortCol = 1) {
   return table([
     { label: 'Team', val: (r) => r.team, cell: (r) => el('span', { className: 'team' }, logo(r.logo), r.team), num: false },
-    { label: 'Games', val: (r) => r.games, num: true }, { label: 'Right %', val: (r) => r.pct, cell: (r) => pct(r.pct), num: true },
+    { label: 'Games', val: (r) => r.games, num: true }, { label: 'Winner %', val: (r) => r.pct, cell: (r) => pct(r.pct), num: true },
     { label: 'Margin err', val: (r) => r.avgMarginErr, cell: (r) => num(r.avgMarginErr), num: true },
     { label: 'Picked to win', val: (r) => r.pickedWin, cell: (r) => pct(r.pickedWin), num: true },
     { label: 'Actually won', val: (r) => r.actualWin, cell: (r) => pct(r.actualWin), num: true },
@@ -400,7 +399,7 @@ async function leaderboardPage() {
   const scope = q.get('scope') || 'alltime';
   const seasons = api.seasonsOf(ps);
   const season = +q.get('season') || seasons[0] || null;
-  const sort = q.get('sort') || 'correct';
+  const sort = q.get('sort') || 'pct';
   const min = +q.get('min') || 1;
   const inSeason = ps.filter((p) => p.season === season);
   const cur = api.currentPeriod(inSeason);
@@ -413,26 +412,25 @@ async function leaderboardPage() {
 
   const board = [...Map.groupBy(rows, (r) => r.user_id).values()].map((g) => ({ user_id: g[0].user_id, name: g[0].name, handle: g[0].handle, ...totals(g) }))
     .filter((r) => r.games >= min);
-  const cmp = { correct: (a, b) => b.correct - a.correct, pct: (a, b) => b.pct - a.pct, exact: (a, b) => b.exact - a.exact,
-    avgMarginErr: (a, b) => a.avgMarginErr - b.avgMarginErr, avgTotalErr: (a, b) => a.avgTotalErr - b.avgTotalErr }[sort] ?? ((a, b) => b.correct - a.correct);
-  // ties: more winners right, then the smaller total-score error
-  board.sort((a, b) => cmp(a, b) || b.correct - a.correct || a.avgTotalErr - b.avgTotalErr || a.name.localeCompare(b.name));
+  const cmp = { pct: (a, b) => b.pct - a.pct, exact: (a, b) => b.exact - a.exact,
+    avgMarginErr: (a, b) => a.avgMarginErr - b.avgMarginErr, avgTotalErr: (a, b) => a.avgTotalErr - b.avgTotalErr }[sort] ?? ((a, b) => b.pct - a.pct);
+  // ties: higher winner %, then the smaller total-score error
+  board.sort((a, b) => cmp(a, b) || b.pct - a.pct || a.avgTotalErr - b.avgTotalErr || a.name.localeCompare(b.name));
   board.forEach((r, i) => { r.rank = i + 1; });
 
   view(
     heading('Everyone', 'Leaderboard'),
-    el('p', { className: 'muted' }, 'Ranked by the chosen column. Ties go to more winners right, then the smaller total-score error (how far off the predicted scores were).'),
+    el('p', { className: 'muted' }, 'Ranked by the chosen column. Ties go to the smaller total-score error (how far off the predicted scores were).'),
     el('div', { className: 'row filters' },
       select('Scope', [['alltime', 'All time'], ['season', 'Season'], ['week', 'Single week']], scope, (v) => setQuery({ scope: v })),
       scope !== 'alltime' && select('Season', seasons.map((s) => [s, s]), season, (v) => setQuery({ season: v, period: '' })),
       scope === 'week' && select('Week', inSeason.map((p) => [periodKey(p), weekLabel(p.stype, p.week)]), periodSel, (v) => setQuery({ period: v })),
-      select('Rank by', [['correct', 'Winners right'], ['pct', 'Winner %'], ['avgMarginErr', 'Margin error'], ['avgTotalErr', 'Total-score error'], ['exact', 'Exact scores']], sort, (v) => setQuery({ sort: v })),
+      select('Rank by', [['pct', 'Winner %'], ['avgMarginErr', 'Margin error'], ['avgTotalErr', 'Total-score error'], ['exact', 'Exact scores']], sort, (v) => setQuery({ sort: v })),
       select('Min games', [[1, 'Any'], [10, '10+'], [50, '50+'], [200, '200+']], min, (v) => setQuery({ min: v }))),
     table([
       { label: '#', val: (r) => r.rank, num: true },
       { label: 'Player', val: (r) => r.name, cell: (r) => r.handle ? link(r.user_id === me.id ? '/me' : `/u/${r.handle}`, r.name) : r.name, num: false },
-      { label: 'Winners right', val: (r) => r.correct, num: true }, { label: 'Games', val: (r) => r.games, num: true },
-      { label: 'Right %', val: (r) => r.pct, cell: (r) => pct(r.pct), num: true },
+      { label: 'Winner %', val: (r) => r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true },
       { label: 'Exact', val: (r) => r.exact, num: true },
       { label: 'Margin err', val: (r) => r.avgMarginErr, cell: (r) => num(r.avgMarginErr), num: true },
       { label: 'Total err', val: (r) => r.avgTotalErr, cell: (r) => num(r.avgTotalErr), num: true },
@@ -442,7 +440,7 @@ async function leaderboardPage() {
 // ---- search ---------------------------------------------------------------------------------
 
 const RANK_COLUMNS = {
-  correct: ['correct', false], pct: ['pct', false], exact: ['exact', false],
+  pct: ['pct', false], exact: ['exact', false],
   avgMarginErr: ['avg_margin_err', true], avgTotalErr: ['avg_total_err', true],
 };
 const PICK_ORDERS = {
@@ -457,7 +455,7 @@ async function searchPage() {
   const q = query();
   const tab = q.get('tab') || 'weeks';
   const f = {
-    order: q.get('order') || 'best', sort: q.get('sort') || 'correct', player: (q.get('player') || '').trim().replace(/^@/, ''),
+    order: q.get('order') || 'best', sort: q.get('sort') || 'pct', player: (q.get('player') || '').trim().replace(/^@/, ''),
     season: +q.get('season') || null, team: q.get('team') || '', result: q.get('result') || '', psort: q.get('psort') || 'biggestMiss',
   };
   const tabs = el('div', { className: 'row filters' }, [['weeks', 'Best / worst weeks'], ['seasons', 'Best / worst seasons'], ['picks', 'Pick explorer']]
@@ -466,7 +464,7 @@ async function searchPage() {
     el('input', { type: 'search', placeholder: 'any player', value: f.player, onchange: (e) => setQuery({ player: e.target.value.trim() }) }));
   const seasonSel = select('Season', [['', 'All seasons'], ...api.seasonsOf(ps).map((s) => [s, s])], f.season ?? '', (v) => setQuery({ season: v }));
   const orderSel = select('Show', [['best', 'Best'], ['worst', 'Worst']], f.order, (v) => setQuery({ order: v }));
-  const sortSel = select('By', [['correct', 'Winners right'], ['pct', 'Winner %'], ['avgMarginErr', 'Margin error'], ['avgTotalErr', 'Total-score error'], ['exact', 'Exact scores']], f.sort, (v) => setQuery({ sort: v }));
+  const sortSel = select('By', [['pct', 'Winner %'], ['avgMarginErr', 'Margin error'], ['avgTotalErr', 'Total-score error'], ['exact', 'Exact scores']], f.sort, (v) => setQuery({ sort: v }));
 
   let controls, results;
   if (tab === 'picks') {
@@ -481,7 +479,7 @@ async function searchPage() {
         { id: r.game_id, ...r, status: 'final' }, { home_pick: r.home_pick, away_pick: r.away_pick },
         { who: r.handle ? link(`/u/${r.handle}`, r.name) : el('span', {}, r.name) })))];
   } else {
-    const [column, lowIsBest] = RANK_COLUMNS[f.sort] ?? RANK_COLUMNS.correct;
+    const [column, lowIsBest] = RANK_COLUMNS[f.sort] ?? RANK_COLUMNS.pct;
     const weeks = tab === 'weeks';
     controls = weeks ? [orderSel, sortSel, player, seasonSel] : [orderSel, sortSel, player];
     const data = await api.ranked(weeks ? 'week_scores' : 'season_scores', {
@@ -489,7 +487,7 @@ async function searchPage() {
     });
     const who = (r) => (r.handle ? link(r.user_id === me.id ? '/me' : `/u/${r.handle}`, r.name) : r.name);
     const common = [
-      { label: 'Right', val: (r) => r.correct, cell: (r) => `${r.correct}/${r.games}`, num: true },
+      { label: 'Winner %', val: (r) => +r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true },
       { label: 'Exact', val: (r) => r.exact, num: true }, { label: 'Margin err', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
       { label: 'Total err', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
     ];
