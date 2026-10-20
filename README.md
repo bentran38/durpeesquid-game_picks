@@ -40,25 +40,22 @@ Scores are computed from picks and results when read, so changing the formula (`
 - **Site**: `site/` is plain ES modules. `app.js` (pages and routing), `api.js` (queries), `scoring.js`, `ui.js`.
   Same look as the other sites: tokens from `themes.css`, topbar, panels, chips.
 
-## One-time setup
+## Setup
 
-1. **Migration:** apply `supabase/migrations/20261020000000_picks.sql` to the shared Supabase project. Then add `picks`
-   under Settings > API > Exposed schemas.
-2. **Project row:** add a `picks` project in the admin dashboard (slug `picks`, title `NFL Picks`, url
-   `https://picks.durpeesquid.com`) and give people access. Every policy requires `project_access` for slug `picks`.
-3. **Sync function:**
-   ```
-   supabase secrets set SYNC_SECRET=<a long random string>
-   supabase functions deploy sync-games --no-verify-jwt
-   ```
-   (JWT verification is off at the gateway; the function checks the secret itself.)
-4. **Schedule it:** fill in and run `supabase/setup/schedule-sync.sql` in the SQL editor. It calls the function every
-   2 minutes via pg_cron; the function decides whether there is work to do. Then load history once, e.g.:
-   ```
-   curl -X POST https://<project-ref>.supabase.co/functions/v1/sync-games \
-     -H "x-sync-secret: <the string>" -H "content-type: application/json" \
-     -d '{"seasons":[2023,2024,2025]}'
-   ```
+Already done for the DurpeeSquid project (schema, exposed schema, function, schedule and 2023 onward loaded). To
+rebuild elsewhere, or to see what exists:
+
+1. **Migrations:** apply `supabase/migrations/20261020000000_picks.sql` and `20261020010000_picks_sync_auth.sql`.
+   Then expose the schema to the API: add `picks` to Settings > API > Exposed schemas (or, in SQL,
+   `alter role authenticator set pgrst.db_schemas = '<existing list>, picks'; notify pgrst, 'reload config';`).
+2. **Project row:** a `picks` row in `public.projects` (slug `picks`, title `NFL Picks`, url
+   `https://picks.durpeesquid.com`), then give people access on the admin dashboard. Every policy requires
+   `project_access` for slug `picks`, so someone without it sees nothing.
+3. **Sync function:** deploy `supabase/functions/sync-games` with JWT verification off
+   (`supabase functions deploy sync-games --no-verify-jwt`). It authenticates callers with a secret in Vault, so
+   there is no function secret to set.
+4. **Schedule and history:** run `supabase/setup/schedule-sync.sql` (fills in the Vault secret, schedules the job and
+   shows how to backfill seasons).
 5. **Vercel:** import this repo, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` (same values as the main
    site). Add `picks.durpeesquid.com` as a domain and a CNAME in Cloudflare (DNS only), as in the main README.
 6. **Icon (optional):** `picks` has an icon in the main site's `site/project-icons.js`; without it the card shows an initial.
@@ -69,7 +66,7 @@ Scores are computed from picks and results when read, so changing the formula (`
 current week (1 ESPN request); otherwise every 30 minutes; and every 6 hours it refreshes every week of this season
 **and the next one**. So a new season's schedule appears when ESPN publishes it, playoff rounds appear as their
 matchups are set (undecided "TBD" matchups are skipped), and weeks unlock as the previous one ends. ESPN's API is
-unofficial, so if its shape ever changes, `supabase/functions/sync-games/index.ts` is the only file to adjust.
+unofficial and rejects some default client user agents (the function sends a browser-style one), so if its behaviour ever changes, `supabase/functions/sync-games/index.ts` is the only file to adjust.
 
 ## Local dev
 

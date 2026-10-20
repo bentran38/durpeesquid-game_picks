@@ -5,7 +5,9 @@
 //   * games in progress           -> refresh the current week (1 ESPN request)
 //   * otherwise, every 30 minutes -> refresh the current week
 //   * every 6 hours               -> refresh every week of this season and the next
-// verify_jwt is off at the gateway; the shared secret below is the check.
+// verify_jwt is off at the gateway; the shared secret is the check. It lives in Supabase Vault
+// (name: picks_sync_secret) and is verified by picks.sync_authorized(), so it is never stored in
+// function environment variables.
 //
 //   POST {}                         normal scheduled run
 //   POST { "force": true }          full sync now
@@ -13,6 +15,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+// ESPN rejects some default client user agents (HTTP 403); send an ordinary browser-style one.
+const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const LIVE_WINDOW_MS = 6 * 3600e3;
 const PERIODS: [number, number][] = [
   ...Array.from({ length: 18 }, (_, i) => [2, i + 1] as [number, number]),
@@ -24,7 +28,7 @@ const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SE
 }).schema('picks');
 
 async function espn(params: string): Promise<any> {
-  const res = await fetch(`${SCOREBOARD}${params}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+  const res = await fetch(`${SCOREBOARD}${params}`, { headers: { accept: 'application/json', 'user-agent': UA }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`ESPN ${res.status}`);
   return res.json();
 }
@@ -71,8 +75,8 @@ async function syncCurrent(): Promise<{ season: number; n: number }> {
   return { season: json.season?.year, n: await upsert(rows) };
 }
 
-async function syncSeason(season: number): Promise<number> {
-  let n = 0;
+async function syncSeason(season: number): Promise<{ n: number; failed: number }> {
+  let n = 0, failed = 0;
   for (let i = 0; i < PERIODS.length; i += 6) {
     const batch = PERIODS.slice(i, i + 6);
     const results = await Promise.all(batch.map(async ([stype, week]) => {
@@ -81,12 +85,13 @@ async function syncSeason(season: number): Promise<number> {
         return (json.events ?? []).map((e: any) => toRow(e, { season, stype, week })).filter(Boolean);
       } catch (err) {
         console.warn(`sync ${season} type ${stype} week ${week}: ${err}`);
+        failed++;
         return [];
       }
     }));
     n += await upsert(results.flat());
   }
-  return n;
+  return { n, failed };
 }
 
 async function liveGames(): Promise<boolean> {
@@ -100,8 +105,8 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 Deno.serve(async (req) => {
-  const secret = Deno.env.get('SYNC_SECRET');
-  if (!secret || req.headers.get('x-sync-secret') !== secret) return json({ error: 'forbidden' }, 403);
+  const { data: allowed } = await db.rpc('sync_authorized', { p_secret: req.headers.get('x-sync-secret') ?? '' });
+  if (allowed !== true) return json({ error: 'forbidden' }, 403);
 
   let body: { force?: boolean; seasons?: number[] } = {};
   try { body = await req.json(); } catch { /* empty body is fine */ }
@@ -112,14 +117,14 @@ Deno.serve(async (req) => {
     const now = new Date().toISOString();
 
     if (body.seasons?.length) {
-      const done: Record<number, number> = {};
+      const done: Record<number, { n: number; failed: number }> = {};
       for (const s of body.seasons.slice(0, 10)) done[s] = await syncSeason(Number(s));
       return json({ mode: 'backfill', done });
     }
 
     if (body.force || age(state?.last_full_sync) > 6 * 3600e3) {
       const { season } = await syncCurrent();
-      const done: Record<number, number> = {};
+      const done: Record<number, { n: number; failed: number }> = {};
       for (const s of [season, season + 1]) done[s] = await syncSeason(s);
       await db.from('sync_state').update({ last_sync: now, last_full_sync: now }).eq('id', 1);
       return json({ mode: 'full', done });
