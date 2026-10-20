@@ -19,6 +19,7 @@ async function setup() {
     game('g1', 1, past(30), 27, 20),
     game('g2', 1, past(30), 10, 31, { home: 'NE', home_name: 'New England Patriots' }),
     game('g3', 2, future, null, null),
+    game('g4', 3, new Date(Date.now() + 8 * 864e5).toISOString(), null, null),
   ]);
   const server = createApp(db);
   await new Promise((r) => server.listen(0, r));
@@ -98,5 +99,28 @@ test('stats, leaderboard and searches over finished games', async () => {
     assert.equal(miss.results[0].result.marginErr, 14);
     assert.equal((await ann('GET', '/api/search/picks?result=nope')).status, 400);
     assert.equal((await ann('GET', '/api/search/seasons?minGames=1')).data.results.length, 2);
+  } finally { server.close(); }
+});
+
+test('weeks unlock one at a time', async () => {
+  const { server, client } = await setup();
+  try {
+    const ann = client();
+    await ann('POST', '/api/register', { username: 'ann', password: 'password1' });
+    // week 3 is not open while week 2 is still to be played
+    let r = await ann('PUT', '/api/picks', { picks: [{ gameId: 'g4', home: 20, away: 10 }] });
+    assert.deepEqual(r.data.saved, []);
+    assert.equal(r.data.rejected[0].reason, 'not_open_yet');
+    r = await ann('GET', '/api/games?season=2024&stype=2&week=3');
+    assert.equal(r.data.open, false);
+    assert.equal(r.data.opensAfter.week, 2);
+    assert.equal(r.data.games[0].pickable, false);
+    // week 2 is open (week 1 is over)
+    r = await ann('GET', '/api/games?season=2024&stype=2&week=2');
+    assert.equal(r.data.open, true);
+    assert.equal(r.data.games[0].pickable, true);
+    r = await ann('GET', '/api/periods?season=2024');
+    assert.deepEqual(r.data.periods.map((p) => p.open), [true, true, false]);
+    assert.equal(r.data.current.week, 2);
   } finally { server.close(); }
 });

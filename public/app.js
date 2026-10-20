@@ -143,7 +143,7 @@ function gameCard(g, { editable, collect, showUser }) {
     r ? h('span', {}, `${r.points} pts`) : null,
     r ? h('span', { class: 'muted' }, r.exact ? 'exact score! 🎯' : `margin off by ${r.marginErr}, total off by ${r.totalErr}`) : null,
     !editable && !g.pick ? h('span', { class: 'muted' }, 'no pick') : null,
-    !g.locked && !editable ? h('span', { class: 'badge' }, 'open') : null,
+    !g.locked && !editable ? h('span', { class: 'badge' }, g.pickable ? 'open' : 'not open yet') : null,
   ];
   const card = h('div', { class: 'card game' },
     h('div', { class: 'teams' }, teamRow(g, 'away', editable, inputs), teamRow(g, 'home', editable, inputs)),
@@ -173,7 +173,7 @@ async function periodPicker({ season, stype, week }, onChange) {
   const key = (p) => `${p.stype}-${p.week}`;
   const node = h('div', { class: 'row' },
     select(state.seasons.map((s) => [s.season, s.season]), season, (v) => onChange({ season: Number(v) }), 'Season'),
-    select(periods.map((p) => [key(p), weekLabel(p.stype, p.week)]), `${stype}-${week}`, (v) => {
+    select(periods.map((p) => [key(p), weekLabel(p.stype, p.week) + (p.open ? '' : ' 🔒')]), `${stype}-${week}`, (v) => {
       const [st, wk] = v.split('-').map(Number);
       onChange({ season, stype: st, week: wk });
     }, 'Week'));
@@ -185,9 +185,9 @@ async function viewPicks(params) {
   const p = await periodPicker({ season: params.season && +params.season, stype: params.stype && +params.stype, week: params.week && +params.week },
     (sel) => { location.hash = `#/picks${qs(sel)}`; });
   if (p.empty) return show(p.node);
-  const { games, week } = await api(`/games${qs({ season: p.season, stype: p.stype, week: p.week })}`);
+  const { games, week, open: weekOpen, opensAfter } = await api(`/games${qs({ season: p.season, stype: p.stype, week: p.week })}`);
   const collect = [];
-  const open = games.filter((g) => !g.locked).length;
+  const open = games.filter((g) => g.pickable).length;
   const save = h('button', { class: 'primary', onclick: async () => {
     try {
       const picks = collect.map((f) => f()).filter(Boolean);
@@ -196,10 +196,11 @@ async function viewPicks(params) {
       toast(`Saved ${r.saved.length} pick${r.saved.length === 1 ? '' : 's'}${r.rejected.length ? ` (${r.rejected.length} already locked)` : ''}`);
     } catch (e) { toast(e.message); }
   } }, 'Save picks');
-  const cards = games.map((g) => gameCard(g, { editable: !g.locked && !!state.me, collect }));
+  const cards = games.map((g) => gameCard(g, { editable: g.pickable && !!state.me, collect }));
   show(
     h('h1', {}, `${weekLabel(p.stype, p.week)} · ${p.season}`), p.node,
     !state.me ? h('p', { class: 'card' }, h('a', { href: '#/login' }, 'Log in'), ' to make picks. Games lock at kickoff.') : null,
+    !weekOpen && opensAfter ? h('p', { class: 'card' }, `🔒 Picks for this week open after ${weekLabel(opensAfter.stype, opensAfter.week)} ${opensAfter.season} ends.`) : null,
     weekSummary(week),
     state.me && open ? h('div', { class: 'row' }, save, h('span', { class: 'muted' }, `${open} game${open === 1 ? '' : 's'} open. Locks at kickoff; others see your pick only after that.`)) : null,
     cards.length ? cards : h('p', { class: 'muted' }, 'No games in this week.'));
