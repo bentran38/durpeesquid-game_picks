@@ -188,4 +188,28 @@ class Query {
 }
 
 const from = (table) => new Query(table);
-export const supabase = { from, schema: () => ({ from }) };
+
+// stand-in for picks.submit_week(): same rules as the database function
+async function rpc(name, a) {
+  const fail = (message) => ({ data: null, error: { message } });
+  if (name !== 'submit_week') return fail('Unknown function');
+  const p = periodsView().find((x) => x.season === a.p_season && x.stype === a.p_stype && x.week === a.p_week);
+  if (!p?.open) return fail('This week is not open for picks yet');
+  const open = games.filter((g) => g.season === a.p_season && g.stype === a.p_stype && g.week === a.p_week && g.status !== 'final' && new Date(g.kickoff) > now);
+  if (!open.length) return fail('No games are open for picks in this week');
+  const bad = a.p_picks.some((x) => ![x.home_pick, x.away_pick].every((n) => Number.isInteger(n) && n >= 0 && n <= 99));
+  if (bad) return fail('Scores must be whole numbers from 0 to 99');
+  const missing = open.filter((g) => !a.p_picks.some((x) => x.game_id === g.id));
+  if (missing.length) return fail(`Pick every game before submitting (${missing.length} still missing)`);
+  let saved = 0;
+  for (const g of open) {
+    const x = a.p_picks.find((r) => r.game_id === g.id);
+    const old = picks.find((r) => r.user_id === 'me' && r.game_id === g.id);
+    if (old) Object.assign(old, { home_pick: x.home_pick, away_pick: x.away_pick });
+    else picks.push({ user_id: 'me', game_id: g.id, home_pick: x.home_pick, away_pick: x.away_pick });
+    saved++;
+  }
+  return { data: saved, error: null };
+}
+
+export const supabase = { from, schema: () => ({ from, rpc }) };

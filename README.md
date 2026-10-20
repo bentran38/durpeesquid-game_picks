@@ -5,8 +5,11 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
 [durpeesquid](https://github.com/bentran38/durpeesquid): `site/session.js` imports
 `https://www.durpeesquid.com/auth.js`, so the cookie session and the colour theme carry over.
 
-- **Picks**: predict both scores for every game of the open week. Games lock at kickoff, and other players only see
-  your pick after that, so nobody can copy.
+- **Picks**: predict both scores for every game of the open week. **A week is submitted whole**: the Submit button stays
+  disabled until every game that has not kicked off has both scores (a progress bar shows how many are done), and the
+  database refuses a partial submission, so it cannot be bypassed. You can resubmit changes until each game kicks off;
+  a game that has already kicked off can no longer be picked and does not block submitting the rest. Games lock at
+  kickoff, and other players only see your pick after that, so nobody can copy.
 - **Weeks unlock one at a time**: a week opens once every earlier week (across seasons, playoffs included) has ended.
   A week has ended when all its games are final, or 3 days after its last kickoff (so a postponed game can't block
   the schedule). New weeks, playoff rounds and next season's schedule arrive on their own (see "Keeping it current").
@@ -20,6 +23,8 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
 - **Leaderboard**: all time, a season or a single week, ranked by winner % (default), margin error, total-score error or exact scores.
 - **Search**: best/worst weeks and seasons (any player, any metric), and a pick explorer (biggest misses, closest calls,
   exact scores, blowouts, by team, player or season).
+- **Seasons**: lists and searches start at 2026 (`FIRST_SEASON` in `site/api.js`); each later season appears on its own
+  once its games exist.
 - **Stats**: per player and per team (accuracy, margin and total-score error, picked-to-win % vs actual win %,
   longest streak) and a community "most overrated team" table.
 
@@ -40,19 +45,21 @@ total-score error. Everything is computed from picks and results when read
 
 - **Database**: its own `picks` schema (`supabase/migrations/20261020000000_picks.sql`): `games`, `picks`, and views
   (`periods`, `scored`, `week_scores`, `season_scores`, `team_stats`, `streaks`, `teams`). Row-level security does the
-  enforcing, not the browser: picks are accepted only for games that haven't kicked off in an open week, other
+  enforcing, not the browser: picks can only be written through `picks.submit_week()` (no direct row writes), which
+  accepts a week only if it is open and every unstarted game in it has a pick, other
   players' picks are invisible until kickoff, games and results are writable only by the sync function, and every
   policy requires `project_access` for slug `picks`. Views run with the caller's rights, so those rules apply to stats too.
 - **Results**: the `sync-games` Edge Function reads ESPN's public scoreboard and upserts `picks.games`.
 - **Site**: `site/` is plain ES modules. `app.js` (pages and routing), `api.js` (queries), `scoring.js`, `ui.js`.
-  Same look as the other sites: tokens from `themes.css`, topbar, panels, chips.
+  Same colour themes as the other sites (tokens from `themes.css`). One typeface (Inter, with system fallbacks), sentence-case
+  labels, and motion that respects `prefers-reduced-motion`.
 
 ## Setup
 
 Already done for the DurpeeSquid project (schema, exposed schema, function, schedule and 2023 onward loaded). To
 rebuild elsewhere, or to see what exists:
 
-1. **Migrations:** apply the files in `supabase/migrations/` in order (`..._picks.sql`, `..._picks_sync_auth.sql`, `..._picks_live_and_open_weeks.sql`, `..._picks_remove_points.sql`).
+1. **Migrations:** apply the files in `supabase/migrations/` in order (`..._picks.sql`, `..._picks_sync_auth.sql`, `..._picks_live_and_open_weeks.sql`, `..._picks_remove_points.sql`, `..._picks_submit_week.sql`).
    Then expose the schema to the API: add `picks` to Settings > API > Exposed schemas (or, in SQL,
    `alter role authenticator set pgrst.db_schemas = '<existing list>, picks'; notify pgrst, 'reload config';`).
 2. **Project row:** a `picks` row in `public.projects` (slug `picks`, title `NFL Picks`, url

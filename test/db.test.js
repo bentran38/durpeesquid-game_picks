@@ -111,19 +111,56 @@ test('weeks unlock one at a time', async () => {
   assert.deepEqual(rows.map((r) => [r.week, r.ended, r.open]), [[1, true, true], [2, false, true], [3, false, false]]);
 });
 
+// picks go in through picks.submit_week(), never as direct row writes
+const submit = (user, season, week, picks) =>
+  as(user, `select picks.submit_week($1, 2, $2, $3::jsonb) as n`, [season, week, JSON.stringify(picks)]);
+const pick = (game_id, home_pick = 24, away_pick = 17) => ({ game_id, home_pick, away_pick });
+const fails = (p, re) => assert.rejects(p, re);
+
 test('picks are only accepted while a game is open', async () => {
-  const ins = (id) => as(ANN, `insert into picks.picks (game_id, home_pick, away_pick) values ($1, 24, 17)`, [id]);
-  await ins('b1'); // open week, game in the future
-  await rejects(ins('c1')); // week 3 has not unlocked
-  await rejects(ins('b0')); // already kicked off
-  await rejects(ins('a1')); // already final
-  await rejects(as(ANN, `insert into picks.picks (game_id, home_pick, away_pick) values ('b1', 100, 3)`)); // out of range
-  await rejects(as(EVE, `insert into picks.picks (game_id, home_pick, away_pick) values ('b1', 1, 2)`)); // no access
-  // can edit while open
-  await as(ANN, `update picks.picks set home_pick = 30 where game_id = 'b1'`);
-  assert.equal((await as(ANN, `select home_pick from picks.picks where game_id = 'b1'`)).rows[0].home_pick, 30);
-  // can't write as someone else
-  await rejects(as(BOB, `insert into picks.picks (user_id, game_id, home_pick, away_pick) values ('${ANN}', 'b1', 1, 1)`));
+  // week 2 is open; b0 already kicked off, so b1 is the only game that needs a pick
+  assert.equal((await submit(ANN, 2025, 2, [pick('b1')])).rows[0].n, 1);
+  await fails(submit(ANN, 2025, 3, [pick('c1')]), /not open/); // week 3 has not unlocked
+  await fails(submit(ANN, 2025, 1, [pick('a1')]), /No games are open/); // week 1 is over
+  await fails(submit(ANN, 2025, 2, [pick('b1', 100, 3)]), /0 to 99/); // out of range
+  await fails(submit(ANN, 2025, 2, [{ game_id: 'b1', home_pick: 5 }]), /0 to 99/); // missing score
+  await fails(submit(EVE, 2025, 2, [pick('b1')]), /do not have access/); // no access to the project
+  // a game that already kicked off is ignored if it is sent along
+  assert.equal((await submit(ANN, 2025, 2, [pick('b1', 30, 17), pick('b0')])).rows[0].n, 1);
+  const rows = (await as(ANN, `select game_id, home_pick from picks.picks order by game_id`)).rows;
+  assert.deepEqual(rows.map((r) => [r.game_id, r.home_pick]), [['b1', 30]]);
+});
+
+test('players cannot write pick rows directly', async () => {
+  await fails(as(ANN, `insert into picks.picks (game_id, home_pick, away_pick) values ('b1', 1, 2)`), /permission denied/);
+  await fails(as(ANN, `update picks.picks set home_pick = 1 where game_id = 'b1'`), /permission denied/);
+  await fails(as(ANN, `delete from picks.picks where game_id = 'b1'`), /permission denied/);
+  await fails(as(BOB, `insert into picks.picks (user_id, game_id, home_pick, away_pick) values ('${ANN}', 'b1', 1, 1)`), /permission denied/);
+});
+
+test('a week must be submitted whole: every open game needs a pick', async () => {
+  await db.exec(`
+    insert into picks.games (id, season, stype, week, kickoff, home, away, home_name, away_name) values
+      ('z1', 2032, 2, 1, now() + interval '60 days', 'A', 'B', 'A', 'B'),
+      ('z2', 2032, 2, 1, now() + interval '60 days 3 hours', 'C', 'D', 'C', 'D'),
+      ('z3', 2032, 2, 1, now() - interval '1 hour', 'E', 'F', 'E', 'F');   -- already kicked off
+    insert into picks.open_weeks values (2032, 2, 1);`);
+  const saved = async () => (await db.query(`select count(*)::int as n from picks.picks where game_id in ('z1', 'z2', 'z3')`)).rows[0].n;
+
+  await fails(submit(ANN, 2032, 1, [pick('z1')]), /Pick every game before submitting \(1 still missing\)/);
+  await fails(submit(ANN, 2032, 1, []), /2 still missing/);
+  assert.equal(await saved(), 0, 'a partial submission saves nothing');
+
+  assert.equal((await submit(ANN, 2032, 1, [pick('z1'), pick('z2', 10, 20)])).rows[0].n, 2); // z3 has kicked off: not required
+  assert.equal(await saved(), 2);
+
+  // resubmitting replaces the earlier picks, and still needs every open game
+  await fails(submit(ANN, 2032, 1, [pick('z2')]), /1 still missing/);
+  await submit(ANN, 2032, 1, [pick('z1', 3, 1), pick('z2', 4, 2)]);
+  const now = (await as(ANN, `select game_id, home_pick, away_pick from picks.picks where game_id in ('z1', 'z2') order by game_id`)).rows;
+  assert.deepEqual(now.map((r) => [r.game_id, r.home_pick, r.away_pick]), [['z1', 3, 1], ['z2', 4, 2]]);
+
+  await db.exec(`delete from picks.picks where game_id in ('z1', 'z2'); delete from picks.games where id in ('z1', 'z2', 'z3'); delete from picks.open_weeks;`);
 });
 
 test('other players only see picks once the game has kicked off', async () => {

@@ -6,7 +6,7 @@
 import { requireLogin, hasAccess, signOut, HOME, loadProfile } from './session.js';
 import * as api from './api.js';
 import { scorePick, leading } from './scoring.js';
-import { $, el, weekLabel, periodKey, pct, num, fmtTime, logo, toast, select, stat, table, totals, finish } from './ui.js';
+import { $, el, weekLabel, periodKey, pct, num, fmtTime, logo, toast, select, stat, table, totals, finish, skeleton } from './ui.js';
 
 const SLUG = 'picks';
 let liveTimer; // refreshes the cards of games in progress
@@ -61,7 +61,11 @@ function drawNav() {
   $('nav').replaceChildren(...NAV.map(([p, label]) => el('a', { className: `btn${active(p) ? ' nav-active' : ''}`, href: p }, label)));
 }
 
-const view = (...nodes) => $('view').replaceChildren(...nodes.flat(Infinity).filter((n) => n != null && n !== false));
+const view = (...nodes) => {
+  const list = nodes.flat(Infinity).filter((n) => n != null && n !== false);
+  list.forEach((n, i) => n.style?.setProperty('--i', Math.min(i, 8))); // staggered entrance
+  $('view').replaceChildren(...list);
+};
 const heading = (eyebrow, title, right) =>
   el('section', { className: 'hero' },
     el('div', {}, el('p', { className: 'eyebrow' }, el('span', { className: 'dot' }), eyebrow), el('h1', {}, title)),
@@ -73,6 +77,7 @@ async function render() {
   drawNav();
   const path = location.pathname.replace(/\/+$/, '') || '/';
   const parts = path.split('/').filter(Boolean).map(decodeURIComponent);
+  const loading = setTimeout(() => view(skeleton()), 160); // only if the data is slow
   try {
     const [first, a, b, c, d] = parts;
     if (!first) return await weekPage(me, weekFromQuery());
@@ -90,6 +95,8 @@ async function render() {
   } catch (e) {
     console.error(e);
     failed(e);
+  } finally {
+    clearTimeout(loading);
   }
   window.scrollTo(0, 0);
 }
@@ -111,7 +118,7 @@ function weekFromQuery() {
  * One game. `game` is a picks.games row; `pick` {home_pick, away_pick} or null.
  * With `inputs` the card has score boxes, and registers its fields there.
  */
-function gameCard(game, pick, { inputs, who, state, mine } = {}) {
+function gameCard(game, pick, { inputs, who, state, mine, onInput } = {}) {
   const result = pick ? scorePick(pick, game) : null;
   const final = game.status === 'final';
   const live = game.status === 'live';
@@ -125,7 +132,8 @@ function gameCard(game, pick, { inputs, who, state, mine } = {}) {
     if (inputs) {
       const input = el('input', {
         type: 'number', min: 0, max: 99, inputMode: 'numeric', className: 'score-in', ariaLabel: `${x.name} predicted score`,
-        value: pick ? pick[`${side}_pick`] : '',
+        value: pick ? pick[`${side}_pick`] : '', placeholder: '–',
+        oninput: () => { input.classList.remove('missing'); onInput?.(); },
       });
       (inputs[game.id] ??= {})[side] = input;
       control = input;
@@ -203,38 +211,73 @@ async function weekPage(target, sel) {
   const scored = games.map((g) => picks.has(g.id) ? scorePick(picks.get(g.id), g) : null).filter(Boolean);
   const sum = totals(scored.map((r) => ({ games: 1, correct: +r.correct, exact: +r.exact, margin_err_sum: r.marginErr, total_err_sum: r.totalErr })));
 
+  const openGames = games.filter(open);
   const inputs = {};
-  const cardOf = (g) => gameCard(g, picks.get(g.id), { inputs: open(g) ? inputs : null, mine });
+  const cardOf = (g) => gameCard(g, picks.get(g.id), { inputs: open(g) ? inputs : null, mine, onInput: refreshBar });
   const cards = new Map(games.map((g) => [g.id, cardOf(g)]));
-  const save = el('button', { type: 'button', className: 'btn primary', textContent: 'Save picks' });
+  [...cards.values()].forEach((li, i) => li.style.setProperty('--i', Math.min(i, 12)));
+
+  // A week is submitted whole: every game that has not kicked off needs both scores.
+  const validScore = (v) => v !== '' && Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 99;
+  const rowOf = (g) => {
+    const f = inputs[g.id];
+    const h = f?.home.value.trim(), a = f?.away.value.trim();
+    return validScore(h) && validScore(a) ? { game_id: g.id, home_pick: Number(h), away_pick: Number(a) } : null;
+  };
+  const wasSubmitted = openGames.length > 0 && openGames.every((g) => picks.has(g.id));
+  const fill = el('div', { className: 'bar-fill' });
+  const label = el('div', { className: 'progress-label' });
+  const save = el('button', { type: 'button', className: 'btn primary' });
+  const bar = el('div', { className: 'savebar' }, el('div', { className: 'progress' }, label, el('div', { className: 'bar-track' }, fill)), save);
+
+  function refreshBar() {
+    const rows = openGames.map(rowOf);
+    const filled = rows.filter(Boolean).length;
+    const total = openGames.length;
+    const complete = filled === total;
+    const changed = rows.some((r, i) => {
+      const old = picks.get(openGames[i].id);
+      return r && (old?.home_pick !== r.home_pick || old?.away_pick !== r.away_pick);
+    });
+    const submitted = complete && wasSubmitted && !changed;
+    fill.style.setProperty('--w', `${total ? (100 * filled) / total : 0}%`);
+    label.replaceChildren(
+      submitted ? 'All picks submitted' : `${filled} of ${total} games picked`,
+      el('small', {}, submitted ? 'You can change them until each game kicks off.' : complete ? 'Ready to submit.' : `${total - filled} to go. Every game needs a pick.`));
+    bar.dataset.ready = String(complete && !submitted);
+    save.textContent = submitted ? '✓ Submitted' : wasSubmitted ? 'Update picks' : 'Submit picks';
+    save.classList.toggle('is-done', submitted);
+    save.setAttribute('aria-disabled', String(!complete || submitted));
+  }
+
   save.onclick = async () => {
-    const toSave = [], toClear = [];
-    try {
-      for (const g of games.filter(open)) {
-        const f = inputs[g.id];
-        const h = f.home.value.trim(), a = f.away.value.trim();
-        if (h === '' && a === '') { if (picks.has(g.id)) toClear.push(g.id); continue; }
-        if (h === '' || a === '') throw new Error(`Enter both scores for ${g.away} @ ${g.home}`);
-        const hi = Number(h), ai = Number(a);
-        if (![hi, ai].every((n) => Number.isInteger(n) && n >= 0 && n <= 99)) throw new Error('Scores are whole numbers from 0 to 99');
-        const old = picks.get(g.id);
-        if (!old || old.home_pick !== hi || old.away_pick !== ai) toSave.push({ game_id: g.id, home_pick: hi, away_pick: ai });
+    if (save.getAttribute('aria-disabled') === 'true') {
+      const missing = openGames.filter((g) => !rowOf(g));
+      if (!missing.length) return; // already submitted
+      for (const g of missing) {
+        for (const input of Object.values(inputs[g.id])) if (!validScore(input.value.trim())) input.classList.add('missing');
       }
-      if (!toSave.length && !toClear.length) return toast('Nothing changed');
-      save.disabled = true;
-      await api.savePicks(me.id, toSave);
-      await api.clearPicks(me.id, toClear);
-      toast(`Saved ${toSave.length + toClear.length} change${toSave.length + toClear.length === 1 ? '' : 's'}`);
+      const first = inputs[missing[0].id];
+      const target = [first.away, first.home].find((i) => !validScore(i.value.trim())) ?? first.away;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.focus({ preventScroll: true });
+      return toast(`Pick every game to submit (${missing.length} left)`, true);
+    }
+    save.setAttribute('aria-disabled', 'true');
+    save.textContent = 'Submitting…';
+    try {
+      await api.submitWeek(sel, openGames.map(rowOf));
+      toast('Picks submitted');
       await weekPage(target, sel);
     } catch (e) {
-      toast(e.message.includes('row-level security') ? 'That game has already kicked off or its week is not open' : e.message, true);
-      save.disabled = false;
+      toast(/row-level|permission denied/i.test(e.message) ? 'This week is no longer open for picks' : e.message, true);
+      refreshBar();
     }
   };
 
   const heroRight = scored.length
     ? el('div', { className: 'statpanel' },
-        cell('Winner %', `${pct(sum.pct)} (${sum.correct}/${sum.games})`), cell('Exact', sum.exact), cell('Margin err', num(sum.avgMarginErr)), cell('Total err', num(sum.avgTotalErr)))
+        cell('Winner %', `${pct(sum.pct)} (${sum.correct}/${sum.games})`), cell('Exact', sum.exact), cell('Margin error', num(sum.avgMarginErr)), cell('Total error', num(sum.avgTotalErr)))
     : null;
 
   const earlier = period.open ? null : firstBlocker(ps, period);
@@ -248,8 +291,8 @@ async function weekPage(target, sel) {
     games.length
       ? el('ul', { className: 'games' }, [...cards.values()])
       : el('p', { className: 'empty' }, 'No games in this week.'),
-    mine && anyOpen && el('div', { className: 'savebar' }, save,
-      el('span', { className: 'muted' }, `Games lock at kickoff, and other players only see your pick after that.`)));
+    mine && anyOpen && bar);
+  if (mine && anyOpen) refreshBar();
   watchLive(games, cards, sel, cardOf);
 }
 
@@ -259,6 +302,7 @@ function watchLive(games, cards, sel, cardOf) {
   const active = (g) => g.status === 'live' || (g.status === 'scheduled' && new Date(g.kickoff) <= Date.now());
   if (!games.some(active)) return;
   const known = new Map(games.map((g) => [g.id, sig(g)]));
+  const latest = new Map(games.map((g) => [g.id, g]));
   liveTimer = setInterval(async () => {
     if (document.hidden) return;
     try {
@@ -267,6 +311,14 @@ function watchLive(games, cards, sel, cardOf) {
         if (known.get(g.id) === sig(g)) continue;
         known.set(g.id, sig(g));
         const next = cardOf(g);
+        next.classList.add('updated'); // no entrance animation, just a flash on the score that changed
+        const before = latest.get(g.id);
+        const reals = next.querySelectorAll('.real');
+        if (before && reals.length === 2) {
+          if (before.away_score !== g.away_score) reals[0].classList.add('changed');
+          if (before.home_score !== g.home_score) reals[1].classList.add('changed');
+        }
+        latest.set(g.id, g);
         cards.get(g.id)?.replaceWith(next);
         cards.set(g.id, next);
       }
@@ -328,8 +380,8 @@ async function profilePage(target, season) {
     table([
       { label: 'Season', val: (r) => r.season, num: false }, { label: 'Games', val: (r) => r.games, num: true },
       { label: 'Winner %', val: (r) => +r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true }, { label: 'Exact', val: (r) => r.exact, num: true },
-      { label: 'Margin err', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
-      { label: 'Total err', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
+      { label: 'Margin error', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
+      { label: 'Total error', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
     ], seasonRows, { sortCol: 0, onRow: (r) => go(`${base}/${r.season}`) }),
     el('h2', { className: 'section' }, `Weeks${season ? ` · ${season}` : ''}`),
     table([
@@ -337,8 +389,8 @@ async function profilePage(target, season) {
       { label: 'Week', val: (r) => r.stype * 100 + r.week, cell: (r) => weekLabel(r.stype, r.week), num: false },
       { label: 'Picked', val: (r) => r.games, cell: (r) => `${r.games}/${r.games_in_week}`, num: true },
       { label: 'Winner %', val: (r) => +r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true },
-      { label: 'Exact', val: (r) => r.exact, num: true }, { label: 'Margin err', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
-      { label: 'Total err', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
+      { label: 'Exact', val: (r) => r.exact, num: true }, { label: 'Margin error', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
+      { label: 'Total error', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
     ], weeks, { sortCol: 3, onRow: (r) => go(`${base}/${r.season}/${r.stype}/${r.week}`) }),
     el('h2', { className: 'section' }, 'By team (games involving the team)'),
     teamTable(teamRows));
@@ -369,7 +421,7 @@ function teamTable(rows, sortCol = 1) {
   return table([
     { label: 'Team', val: (r) => r.team, cell: (r) => el('span', { className: 'team' }, logo(r.logo), r.team), num: false },
     { label: 'Games', val: (r) => r.games, num: true }, { label: 'Winner %', val: (r) => r.pct, cell: (r) => pct(r.pct), num: true },
-    { label: 'Margin err', val: (r) => r.avgMarginErr, cell: (r) => num(r.avgMarginErr), num: true },
+    { label: 'Margin error', val: (r) => r.avgMarginErr, cell: (r) => num(r.avgMarginErr), num: true },
     { label: 'Picked to win', val: (r) => r.pickedWin, cell: (r) => pct(r.pickedWin), num: true },
     { label: 'Actually won', val: (r) => r.actualWin, cell: (r) => pct(r.actualWin), num: true },
     { label: 'Overrated', title: 'Picked-to-win % minus actual win %. Positive = overrated, negative = underrated', val: (r) => r.bias,
@@ -430,10 +482,10 @@ async function leaderboardPage() {
     table([
       { label: '#', val: (r) => r.rank, num: true },
       { label: 'Player', val: (r) => r.name, cell: (r) => r.handle ? link(r.user_id === me.id ? '/me' : `/u/${r.handle}`, r.name) : r.name, num: false },
-      { label: 'Winner %', val: (r) => r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true },
+      { label: 'Winner %', val: (r) => r.pct, cell: (r) => el('div', { className: 'pctcell' }, `${pct(r.pct)} (${r.correct}/${r.games})`, el('i', { className: 'meter', style: `--w:${r.pct}%` })), num: true },
       { label: 'Exact', val: (r) => r.exact, num: true },
-      { label: 'Margin err', val: (r) => r.avgMarginErr, cell: (r) => num(r.avgMarginErr), num: true },
-      { label: 'Total err', val: (r) => r.avgTotalErr, cell: (r) => num(r.avgTotalErr), num: true },
+      { label: 'Margin error', val: (r) => r.avgMarginErr, cell: (r) => num(r.avgMarginErr), num: true },
+      { label: 'Total error', val: (r) => r.avgTotalErr, cell: (r) => num(r.avgTotalErr), num: true },
     ], board, { sortCol: 0, desc: false }));
 }
 
@@ -488,8 +540,8 @@ async function searchPage() {
     const who = (r) => (r.handle ? link(r.user_id === me.id ? '/me' : `/u/${r.handle}`, r.name) : r.name);
     const common = [
       { label: 'Winner %', val: (r) => +r.pct, cell: (r) => `${pct(r.pct)} (${r.correct}/${r.games})`, num: true },
-      { label: 'Exact', val: (r) => r.exact, num: true }, { label: 'Margin err', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
-      { label: 'Total err', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
+      { label: 'Exact', val: (r) => r.exact, num: true }, { label: 'Margin error', val: (r) => +r.avg_margin_err, cell: (r) => num(r.avg_margin_err), num: true },
+      { label: 'Total error', val: (r) => +r.avg_total_err, cell: (r) => num(r.avg_total_err), num: true },
     ];
     results = [
       el('p', { className: 'muted' }, weeks ? 'Weeks with at least 5 finished picks. Click a row to see the picks.' : 'Seasons with at least 20 finished picks. Click a row to open it.'),

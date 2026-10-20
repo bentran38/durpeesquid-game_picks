@@ -70,14 +70,21 @@ export function table(cols, rows, { onRow, sortCol = null, desc = true } = {}) {
             onclick: () => { if (sc === i) sd = !sd; else { sc = i; sd = c.num !== false; } draw(); },
           }, c.label, sc === i ? (sd ? ' ▼' : ' ▲') : ''))),
         ),
-        el('tbody', {}, data.map((row) =>
-          el('tr', { className: onRow ? 'click' : '', onclick: onRow ? () => onRow(row) : null },
+        el('tbody', {}, data.map((row, i) =>
+          el('tr', { className: onRow ? 'click' : '', onclick: onRow ? () => onRow(row) : null, style: `--i:${Math.min(i, 24)}` },
             cols.map((c) => el('td', { className: c.num ? 'num' : '' }, c.cell ? c.cell(row) : c.val(row) ?? '–')))))),
     );
   };
   draw();
   return wrap;
 }
+
+/** Placeholder shown while a page loads. */
+export const skeleton = () => [
+  el('div', { className: 'skel title' }),
+  el('div', { className: 'skel bar' }),
+  el('div', { className: 'skel-grid' }, [0, 1, 2, 3].map(() => el('div', { className: 'skel card' }))),
+];
 
 // ---- totals ---------------------------------------------------------------------------------
 

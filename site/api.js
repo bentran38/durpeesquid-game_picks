@@ -3,6 +3,9 @@
 import { supabase } from './session.js';
 
 const db = supabase.schema('picks');
+// Nobody picked before 2026, so older seasons are left out of every list and search. Later seasons appear
+// by themselves as soon as their games exist.
+export const FIRST_SEASON = 2026;
 const PAGE = 1000; // PostgREST returns at most 1000 rows per request
 
 const ok = ({ data, error, count }) => {
@@ -25,7 +28,7 @@ async function all(build) {
 let periodsCache;
 /** Every week that exists, oldest first, with `ended` and `open` flags. */
 export async function periods() {
-  periodsCache ??= ok(await db.from('periods').select('*').order('season').order('stype').order('week'));
+  periodsCache ??= ok(await db.from('periods').select('*').gte('season', FIRST_SEASON).order('season').order('stype').order('week'));
   return periodsCache;
 }
 export const refreshPeriods = () => { periodsCache = undefined; };
@@ -49,14 +52,12 @@ export async function picksFor(userId, gameIds) {
   return ok(await db.from('picks').select('game_id, home_pick, away_pick').eq('user_id', userId).in('game_id', gameIds));
 }
 
-export async function savePicks(userId, rows) {
-  if (!rows.length) return;
-  ok(await db.from('picks').upsert(rows.map((r) => ({ user_id: userId, ...r })), { onConflict: 'user_id,game_id' }));
-}
-
-export async function clearPicks(userId, gameIds) {
-  if (!gameIds.length) return;
-  ok(await db.from('picks').delete().eq('user_id', userId).in('game_id', gameIds));
+/**
+ * Submits a whole week. The database refuses it unless every game that is still open in that week has a
+ * pick (rows: {game_id, home_pick, away_pick}), and it replaces any earlier picks for those games.
+ */
+export async function submitWeek({ season, stype, week }, rows) {
+  return ok(await db.rpc('submit_week', { p_season: season, p_stype: stype, p_week: week, p_picks: rows }));
 }
 
 // ---- people ---------------------------------------------------------------------------------
@@ -69,7 +70,7 @@ export async function profileByHandle(handle) {
 // ---- stats ----------------------------------------------------------------------------------
 
 export const weekScores = ({ userId, season } = {}) => all(() => {
-  let q = db.from('week_scores').select('*');
+  let q = db.from('week_scores').select('*').gte('season', FIRST_SEASON);
   if (userId) q = q.eq('user_id', userId);
   if (season) q = q.eq('season', season);
   return q;
@@ -79,14 +80,14 @@ export const weekScoresFor = ({ season, stype, week }) =>
   all(() => db.from('week_scores').select('*').eq('season', season).eq('stype', stype).eq('week', week));
 
 export const seasonScores = ({ userId, season } = {}) => all(() => {
-  let q = db.from('season_scores').select('*');
+  let q = db.from('season_scores').select('*').gte('season', FIRST_SEASON);
   if (userId) q = q.eq('user_id', userId);
   if (season) q = q.eq('season', season);
   return q;
 });
 
 export const teamStats = ({ userId, season } = {}) => all(() => {
-  let q = db.from('team_stats').select('*');
+  let q = db.from('team_stats').select('*').gte('season', FIRST_SEASON);
   if (userId) q = q.eq('user_id', userId);
   if (season) q = q.eq('season', season);
   return q;
@@ -103,7 +104,7 @@ export async function teams() {
 
 /** Best/worst search over weeks or seasons, ranked by the database. */
 export async function ranked(view, { column, ascending, minGames, handle, season, worst = false, limit = 50 }) {
-  let q = db.from(view).select('*').gte('games', minGames);
+  let q = db.from(view).select('*').gte('games', minGames).gte('season', FIRST_SEASON);
   if (handle) q = q.eq('handle', handle.toLowerCase());
   if (season) q = q.eq('season', season);
   q = q.order(column, { ascending });
@@ -115,7 +116,7 @@ export async function ranked(view, { column, ascending, minGames, handle, season
 
 /** Individual scored picks: biggest misses, exact calls, upsets... */
 export async function scoredPicks({ handle, season, team, result, order, limit = 50 }) {
-  let q = db.from('scored').select('*', { count: 'exact' });
+  let q = db.from('scored').select('*', { count: 'exact' }).gte('season', FIRST_SEASON);
   if (handle) q = q.eq('handle', handle.toLowerCase());
   if (season) q = q.eq('season', season);
   if (team) q = q.or(`home.eq.${team},away.eq.${team}`);
