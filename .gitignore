@@ -28,3 +28,8 @@ dist-ssr
 # generated from env vars by scripts/gen-config.js
 site/config.js
 test/node_modules/
+
+# secrets
+.env
+.env.*
+!.env.example
