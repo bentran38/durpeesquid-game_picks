@@ -93,11 +93,6 @@ export const teamStats = ({ userId, season } = {}) => all(() => {
   return q;
 });
 
-export async function streak(userId) {
-  const rows = ok(await db.from('streaks').select('longest, current').eq('user_id', userId));
-  return rows[0] ?? { longest: 0, current: 0 };
-}
-
 export async function teams() {
   return ok(await db.from('teams').select('*').order('name'));
 }
