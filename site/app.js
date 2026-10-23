@@ -165,7 +165,7 @@ function gameCard(game, pick, { inputs, who, state, mine, onInput } = {}) {
       el('span', {}, fmtTime(game.kickoff)),
       live && pick && el('span', { className: ahead ? 'good' : 'bad' }, ahead ? 'Your pick is ahead' : 'Your pick is behind'),
       result && el('span', { className: `pill`, style: `--c: var(--${result.correct ? 'good' : 'bad'})` }, result.correct ? 'Right winner' : 'Wrong winner'),
-      result && el('span', {}, result.exact ? 'Exact score 🎯' : `margin off by ${result.marginErr}, total off by ${result.totalErr}`),
+      result && el('span', {}, result.exact ? 'Exact score 🎯' : `Margin ±${result.marginErr} · Total ±${result.totalErr}`),
       !pick && !inputs && (final || mine ? (final ? el('span', {}, 'No pick') : null) : el('span', {}, new Date(game.kickoff) > Date.now() ? 'Pick hidden until kickoff' : 'No pick'))));
   card.dataset.state = cardState;
   return card;
