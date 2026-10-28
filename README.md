@@ -20,6 +20,8 @@ Served at `picks.durpeesquid.com`. Static site (no framework), same Supabase pro
   of that (`insert into picks.open_weeks values (2026, 2, 7);`, delete the row to go back to the rule).
 - **History** (`/me`, `/u/<handle>`, add `/<season>` or `/<season>/<stype>/<week>`): every season and week you have
   played, with picks next to the real results.
+- **Everyone's picks** (`/everyone`, add `?season=&stype=&week=`): every player's pick on every game of a week, past or
+  current, next to the real result. Others' picks appear as each game kicks off.
 - **Leaderboard**: all time, a season or a single week, ranked by winner % (default), margin error, total-score error or exact scores.
 - **Search**: best/worst weeks and seasons (any player, any metric), and a pick explorer (biggest misses, closest calls,
   exact scores, blowouts, by team, player or season).

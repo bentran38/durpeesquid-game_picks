@@ -2,6 +2,7 @@
 //   /                         my picks for the current (or chosen) week
 //   /me, /u/<handle>          history and stats for a player (add /<season> for one season)
 //   /me/<season>/<stype>/<week>, /u/<handle>/<season>/<stype>/<week>   one week's picks
+//   /everyone                 everyone's picks for the current (or chosen) week
 //   /leaderboard  /search  /teams
 import { requireLogin, hasAccess, signOut, HOME, loadProfile } from './session.js';
 import * as api from './api.js';
@@ -54,7 +55,7 @@ document.addEventListener('click', (e) => {
 });
 addEventListener('popstate', render);
 
-const NAV = [['/', 'Picks'], ['/me', 'My Stats'], ['/leaderboard', 'Leaderboard'], ['/search', 'Search'], ['/teams', 'Teams']];
+const NAV = [['/', 'Picks'], ['/everyone', "Everyone's Picks"], ['/me', 'My Stats'], ['/leaderboard', 'Leaderboard'], ['/search', 'Search'], ['/teams', 'Teams']];
 function drawNav() {
   const here = location.pathname;
   const active = (p) => (p === '/' ? here === '/' || /^\/me\/\d/.test(here) : here === p || here.startsWith(`${p}/`));
@@ -88,6 +89,7 @@ async function render() {
       if (rest[2] != null) return await weekPage(target, { season: +rest[0], stype: +rest[1], week: +rest[2] });
       return await profilePage(target, rest[0] ? +rest[0] : null);
     }
+    if (first === 'everyone') return await everyonePage(weekFromQuery());
     if (first === 'leaderboard') return await leaderboardPage();
     if (first === 'search') return await searchPage();
     if (first === 'teams') return await teamsPage();
@@ -130,10 +132,16 @@ function gameCard(game, pick, { inputs, who, state, mine, onInput } = {}) {
     const x = t(side), y = t(other);
     let control = null;
     if (inputs) {
+      // A text box, not type=number, so the mouse wheel and arrow keys can't nudge a score by accident: typing only.
       const input = el('input', {
-        type: 'number', min: 0, max: 99, inputMode: 'numeric', className: 'score-in', ariaLabel: `${x.name} predicted score`,
-        value: pick ? pick[`${side}_pick`] : '', placeholder: '–',
-        oninput: () => { input.classList.remove('missing'); onInput?.(); },
+        type: 'text', inputMode: 'numeric', pattern: '[0-9]*', maxLength: 2, autocomplete: 'off', className: 'score-in',
+        ariaLabel: `${x.name} predicted score`, value: pick ? pick[`${side}_pick`] : '', placeholder: '–',
+        oninput: () => {
+          const digits = input.value.replace(/\D/g, '').slice(0, 2);
+          if (digits !== input.value) input.value = digits;
+          input.classList.remove('missing');
+          onInput?.();
+        },
       });
       (inputs[game.id] ??= {})[side] = input;
       control = input;
@@ -283,7 +291,7 @@ async function weekPage(target, sel) {
   view(
     heading(mine ? 'My picks' : target.name, `${weekLabel(period.stype, period.week)} · ${period.season}`, heroRight),
     picker,
-    !mine && el('p', {}, link(personHref(target), `← ${target.name}'s stats`)),
+    el('p', { className: 'row' }, !mine && link(personHref(target), `← ${target.name}'s stats`), link(everyoneHref(sel), "See everyone's picks for this week →")),
     !period.open && el('section', { className: 'panel notice' },
       el('span', {}, '🔒'),
       el('span', {}, earlier ? `Picks for this week open after ${weekLabel(earlier.stype, earlier.week)} ${earlier.season} ends.` : 'Picks for this week are not open yet.')),
@@ -326,6 +334,77 @@ function watchLive(games, cards, sel, cardOf) {
       // keep what is on screen; the next tick tries again
     }
   }, 20_000);
+}
+
+// ---- everyone's picks for one week ---------------------------------------------------------
+
+const everyoneHref = (p) => `/everyone?season=${p.season}&stype=${p.stype}&week=${p.week}`;
+
+/** Every player's pick on every game of a week, side by side. Others' picks show from kickoff on. */
+async function everyonePage(sel) {
+  const ps = await api.periods();
+  if (!ps.length) return view(heading('Everyone', 'No games yet'), el('p', { className: 'muted' }, 'The schedule has not been loaded yet. Check back soon.'));
+  if (!sel.season || !sel.stype || !sel.week) {
+    const cur = api.currentPeriod(ps);
+    sel = { season: cur.season, stype: cur.stype, week: cur.week };
+  }
+  const period = ps.find((p) => p.season === sel.season && p.stype === sel.stype && p.week === sel.week);
+  if (!period) return view(heading('Everyone', 'No such week'), el('p', {}, link('/everyone', 'Back to this week')));
+
+  const games = await api.weekGames(sel);
+  const rows = await api.allPicksFor(games.map((g) => g.id));
+  const gameById = new Map(games.map((g) => [g.id, g]));
+  const kicked = (g) => g.status !== 'scheduled' || new Date(g.kickoff) <= Date.now();
+  const hidden = games.filter((g) => !kicked(g)).length;
+
+  // one column per player: me first, then by winner % this week (as on the leaderboard), then by name
+  const players = [...Map.groupBy(rows, (r) => r.user_id).values()].map((list) => {
+    const results = list.map((r) => scorePick(r, gameById.get(r.game_id))).filter(Boolean);
+    return {
+      id: list[0].user_id, handle: list[0].handle, name: list[0].user_id === me.id ? 'You' : list[0].name,
+      picks: new Map(list.map((r) => [r.game_id, r])), ...totals(results.map((r) => ({ games: 1, correct: +r.correct, exact: +r.exact, margin_err_sum: r.marginErr, total_err_sum: r.totalErr }))),
+    };
+  });
+  players.sort((a, b) => (b.id === me.id) - (a.id === me.id) || (b.pct ?? -1) - (a.pct ?? -1) || (a.avgTotalErr ?? Infinity) - (b.avgTotalErr ?? Infinity) || a.name.localeCompare(b.name));
+
+  const playerHref = (p) => (p.id === me.id ? `/?season=${sel.season}&stype=${sel.stype}&week=${sel.week}` : p.handle ? `/u/${p.handle}/${sel.season}/${sel.stype}/${sel.week}` : null);
+  const pickCell = (p, g) => {
+    const pick = p.picks.get(g.id);
+    if (!pick) return el('td', { className: 'num muted', title: kicked(g) || p.id === me.id ? 'No pick' : 'Hidden until kickoff' }, kicked(g) || p.id === me.id ? '–' : '🔒');
+    const result = scorePick(pick, g);
+    const ahead = leading(pick, g);
+    const tone = result ? (result.exact ? 'exact' : result.correct ? 'right' : 'wrong') : ahead == null ? '' : ahead ? 'right' : 'wrong';
+    const title = result ? `${result.exact ? 'Exact score' : result.correct ? 'Right winner' : 'Wrong winner'} · off by ${result.totalErr}` : ahead == null ? 'Pick' : ahead ? 'Ahead right now' : 'Behind right now';
+    return el('td', { className: `num pickcell${tone ? ` ${tone}` : ''}`, title }, `${pick.away_pick}–${pick.home_pick}`);
+  };
+  const gameCell = (g) => el('td', {},
+    el('span', { className: 'team' }, logo(g.away_logo), g.away, el('span', { className: 'muted' }, '@'), logo(g.home_logo), g.home));
+  const resultCell = (g) => el('td', { className: 'num' },
+    g.status === 'final' ? el('b', {}, `${g.away_score}–${g.home_score}`)
+      : g.status === 'live' ? el('span', { className: 'pill live' }, el('i', { className: 'livedot' }), `${g.away_score ?? 0}–${g.home_score ?? 0}`)
+        : el('span', { className: 'muted' }, fmtTime(g.kickoff)));
+
+  const matrix = !games.length
+    ? el('p', { className: 'empty' }, 'No games in this week.')
+    : !players.length
+      ? el('p', { className: 'empty' }, hidden === games.length ? 'Nobody\'s picks are visible yet. They appear as each game kicks off.' : 'Nobody picked this week.')
+      : el('div', { className: 'table-wrap' }, el('table', { className: 'matrix' },
+          el('thead', {}, el('tr', {},
+            el('th', {}, 'Game'), el('th', { className: 'num' }, 'Result'),
+            players.map((p) => el('th', { className: 'num' }, playerHref(p) ? link(playerHref(p), p.name) : p.name)))),
+          el('tbody', {}, games.map((g, i) => el('tr', { style: `--i:${Math.min(i, 24)}` }, gameCell(g), resultCell(g), players.map((p) => pickCell(p, g))))),
+          el('tfoot', {}, el('tr', {},
+            el('td', {}, 'Winner %'), el('td', {}),
+            players.map((p) => el('td', { className: 'num', title: p.games ? `${p.exact} exact · total error ${num(p.avgTotalErr, 1)} per game` : '' },
+              p.games ? `${pct(p.pct)} (${p.correct}/${p.games})` : '–'))))));
+
+  view(
+    heading('Everyone', `${weekLabel(period.stype, period.week)} · ${period.season}`),
+    periodPicker(ps, sel, (p) => go(everyoneHref(p))),
+    el('p', {}, link(`/?season=${sel.season}&stype=${sel.stype}&week=${sel.week}`, '← My picks for this week')),
+    el('p', { className: 'muted' }, 'Scores read away–home. ',
+      hidden ? `${hidden} of ${games.length} games haven't kicked off, so other players' picks for them stay hidden (🔒) until kickoff.` : ''),
+    matrix);
 }
 
 const cell = (label, value) => el('div', { className: 'stat-cell' }, el('span', { className: 'stat-label' }, label), el('span', { className: 'stat-value' }, String(value)));

@@ -53,6 +53,22 @@ export async function picksFor(userId, gameIds) {
 }
 
 /**
+ * Everyone's picks on these games, with each player's name and handle. As with picksFor, other players'
+ * picks come back only for games that have kicked off (the database hides the rest).
+ */
+export async function allPicksFor(gameIds) {
+  if (!gameIds.length) return [];
+  const rows = await all(() => db.from('picks').select('user_id, game_id, home_pick, away_pick').in('game_id', gameIds).order('user_id').order('game_id'));
+  const ids = [...new Set(rows.map((r) => r.user_id))];
+  const profiles = ids.length ? ok(await supabase.from('profiles').select('user_id, handle, display_name').in('user_id', ids)) : [];
+  const byId = new Map(profiles.map((p) => [p.user_id, p]));
+  return rows.map((r) => {
+    const p = byId.get(r.user_id);
+    return { ...r, handle: p?.handle ?? null, name: p?.display_name || (p?.handle ? `@${p.handle}` : `Player ${r.user_id.slice(0, 4)}`) };
+  });
+}
+
+/**
  * Submits a whole week. The database refuses it unless every game that is still open in that week has a
  * pick (rows: {game_id, home_pick, away_pick}), and it replaces any earlier picks for those games.
  */
