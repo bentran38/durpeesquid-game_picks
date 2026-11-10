@@ -3,11 +3,11 @@
   "outputDirectory": "site",
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/me", "destination": "/index.html" },
-    { "source": "/me/:path*", "destination": "/index.html" },
-    { "source": "/u/:path*", "destination": "/index.html" },
-    { "source": "/leaderboard", "destination": "/index.html" },
-    { "source": "/search", "destination": "/index.html" },
-    { "source": "/teams", "destination": "/index.html" }
+    { "source": "/me", "destination": "/" },
+    { "source": "/me/:path*", "destination": "/" },
+    { "source": "/u/:path*", "destination": "/" },
+    { "source": "/leaderboard", "destination": "/" },
+    { "source": "/search", "destination": "/" },
+    { "source": "/teams", "destination": "/" }
   ]
 }
