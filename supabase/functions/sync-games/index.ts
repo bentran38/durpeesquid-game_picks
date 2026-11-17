@@ -46,6 +46,13 @@ function toRow(e: any, fallback?: { season: number; stype: number; week: number 
   const away = comp?.competitors?.find((c: any) => c.homeAway === 'away');
   const tbd = (c: any) => !c?.team?.abbreviation || /^(TBD|TBA)$/i.test(c.team.abbreviation);
   if (tbd(home) || tbd(away)) return null;
+  // ESPN has served junk dates (every game at 1993-01-31T23:30Z, a placeholder). Writing one would make
+  // games look kicked off and weeks look over, locking picks, so skip the event and keep the stored row.
+  const kickoff = new Date(e.date);
+  if (Number.isNaN(kickoff.getTime()) || kickoff < new Date(Date.UTC(season, 7, 1)) || kickoff >= new Date(Date.UTC(season + 1, 2, 1))) {
+    console.warn(`skipping ${e.id}: kickoff ${e.date} is outside the ${season} season`);
+    return null;
+  }
   const completed = !!e.status?.type?.completed;
   const inProgress = e.status?.type?.state === 'in';
   const score = (c: any) => ((completed || inProgress) && c.score != null && c.score !== '' ? Number(c.score) : null);
@@ -59,7 +66,7 @@ function toRow(e: any, fallback?: { season: number; stype: number; week: number 
   const fieldPos = sit?.possessionText ?? /at ([A-Z]{2,3} \d+)/.exec(sit?.downDistanceText ?? '')?.[1] ?? null;
   return {
     id: String(e.id), season, stype, week,
-    kickoff: new Date(e.date).toISOString(),
+    kickoff: kickoff.toISOString(),
     home: home.team.abbreviation, away: away.team.abbreviation,
     home_name: home.team.displayName, away_name: away.team.displayName,
     home_logo: home.team.logo ?? null, away_logo: away.team.logo ?? null,
